@@ -221,6 +221,7 @@ int main(int argc, char** argv) {
     }
 
     return app.run(argc, argv, [&] {
+
         seastar::engine().at_exit([&splitter] { return splitter.stop(); });
 
         auto& opts = app.configuration();
@@ -228,10 +229,13 @@ int main(int argc, char** argv) {
           opts["input"].as<seastar::sstring>());
         const auto memory_pct = opts["memory-pct"].as<double>() / 100.0;
 
+        lg.info("beginning...");
+
         return splitter.start(input, memory_pct).then([&] {
             return splitter.invoke_on_all(&file_splitter::start)
               .then([&splitter] { return monitor(splitter); })
               .then([] { return seastar::make_ready_future<int>(0); });
         });
     });
+
 }
