@@ -5,5 +5,5 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(seastar)
 
-add_executable(main main.cc)
+add_executable(main big_file_splitter.cpp)
 target_link_libraries(main Seastar::seastar)
