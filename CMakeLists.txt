@@ -5,5 +5,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(seastar)
 
-add_executable(main big_file_splitter.cpp)
-target_link_libraries(main Seastar::seastar)
+add_executable(big_file_splitter big_file_splitter.cpp)
+target_link_libraries(big_file_splitter Seastar::seastar)
+
+add_executable(prime_calculator prime_calculator.cpp)
+target_link_libraries(prime_calculator Seastar::seastar)
