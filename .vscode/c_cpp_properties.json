@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "name": "Linux-GCC-11",
+            "compilerPath": "/usr/bin/g++-11", // 关键：指定编译器
+            "includePath": [
+                // 1. 编译器自动发现的标准库路径（由compilerPath派生，通常无需手动添加）
+                "${workspaceFolder}/**", // 项目文件
+                // 2. 如果你想显式添加或使用其他版本的头文件，可在此添加
+                "/usr/include/c++/11",
+                "/usr/include/x86_64-linux-gnu/c++/11",
+                "/usr/include/c++/11/backward",
+                "/usr/lib/gcc/x86_64-linux-gnu/11/include",
+                "/usr/local/include",
+                "/usr/include/x86_64-linux-gnu",
+                "/usr/include"
+            ],
+            "defines": [],
+            "cStandard": "c23",
+            "cppStandard": "gnu++23",
+            "intelliSenseMode": "linux-gcc-x64",
+            "configurationProvider": "ms-vscode.cmake-tools" // 如果使用CMake则保留
+        }            
+    ],
+    "version": 4
+}
