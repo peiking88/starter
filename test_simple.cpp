@@ -54,7 +54,7 @@ std::vector<int> find_primes(int start, int end) {
 // 每个shard计算素数个数（map阶段）
 ss::future<size_t> count_primes_on_shard(int shard_id) {
     return ss::async([shard_id] {
-        const int base_numbers = 100000000;
+        const int base_numbers = 10000000;
         
         // shard 0 不参与素数计算，只返回0
         if (shard_id == 0) {
@@ -94,7 +94,7 @@ ss::future<size_t> count_primes_on_shard(int shard_id) {
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-        app_log.info("Shard {:2} [{:8}, {:8}] 发现{:6}个素数，耗时{:5}ms", 
+        app_log.info("Shard {:2} [{:10}, {:10}] 发现{:8}个素数，耗时{:8}ms", 
                      shard_id, start, end, total_primes, duration.count());
         return total_primes;
     });
