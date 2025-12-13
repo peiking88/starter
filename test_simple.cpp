@@ -49,7 +49,7 @@ std::vector<int> find_primes(int start, int end) {
 // 每个shard计算素数个数（map阶段）
 ss::future<size_t> count_primes_on_shard(int shard_id) {
     return ss::async([shard_id] {
-        const int numbers_per_shard = 200000;
+        const int numbers_per_shard = 100000;
         
         // 计算当前shard负责的区间
         int start = shard_id * numbers_per_shard + 1;
