@@ -54,7 +54,7 @@ std::vector<int> find_primes(int start, int end) {
 // 每个shard计算素数个数（map阶段）
 ss::future<size_t> count_primes_on_shard(int shard_id) {
     return ss::async([shard_id] {
-        const int base_numbers = 1000000;
+        const int base_numbers = 100000000;
         
         // shard 0 不参与素数计算，只返回0
         if (shard_id == 0) {
@@ -102,22 +102,33 @@ ss::future<size_t> count_primes_on_shard(int shard_id) {
 
 // 基于map-reduce的并行素数统计
 ss::future<> async_task() {
-    // 创建一个shard范围 [0, smp::count-1]
-    boost::integer_range<int> shards(0, ss::smp::count);
+    // 记录协调开始时间
+    auto coordination_start = std::chrono::high_resolution_clock::now();
+    
+    // 创建一个shard范围 [1, smp::count-1]（跳过shard 0）
+    boost::integer_range<int> shards(1, ss::smp::count);
 
     return ss::map_reduce(
              shards,
              // mapper函数 - 在每个shard上计算素数个数
              [](int shard_id) {
-                 //app_log.info("Shard {}/{} 启动", shard_id, ss::smp::count);
-                 return count_primes_on_shard(shard_id);
+                 // 将任务提交到目标shard执行，避免在shard 0上协调
+                 return ss::smp::submit_to(shard_id, [shard_id] {
+                     return count_primes_on_shard(shard_id);
+                 });
              },
              // reduce函数 - 累加所有shard的素数个数
              size_t(0),
              [](size_t total, size_t count) { return total + count; })
-      .then([](size_t total_primes) {
+      .then([coordination_start](size_t total_primes) {
+          // 计算协调任务耗时
+          auto coordination_end = std::chrono::high_resolution_clock::now();
+          auto coordination_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+              coordination_end - coordination_start);
+          
           app_log.info("=== 素数统计结果 ===");
           app_log.info("总共找到 {} 个素数", total_primes);
+          app_log.info("协调任务耗时: {}ms", coordination_duration.count());
 
           return ss::make_ready_future<>();
       });
