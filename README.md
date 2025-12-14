@@ -58,7 +58,7 @@ amount of memory or the number of cores are not specified then the program will
 try to use all of the resources available.
 
 ```
-$ build/main --input input.dat -m500 -c5 --memory-pct 1.0
+$ build/big_file_splitter --input input.dat -m500 -c5 --memory-pct 1.0
 ```
 
 The program should output a summary on each core about the data it is
@@ -87,6 +87,26 @@ $ ls -l chunk*
 -rw-r--r--. 1 user user 331776 Jan 13 13:10 chunk.core-0.101
 -rw-r--r--. 1 user user 331776 Jan 13 13:10 chunk.core-0.102
 -rw-r--r--. 1 user user 331776 Jan 13 13:10 chunk.core-0.103
+```
+
+```
+$ build/prime_calculator -t 1000
+
+```
+```
+INFO  2025-12-14 11:35:37,087 [shard 30:main] test_simple - Shard 30 完成  30 个任务，总计素数:   171998, 耗时:   2493ms, 平均每个任务:   83ms
+INFO  2025-12-14 11:35:37,091 [shard 11:main] test_simple - Shard 11 完成  33 个任务，总计素数:   190181, 耗时:   2502ms, 平均每个任务:   75ms
+INFO  2025-12-14 11:35:37,094 [shard 10:main] test_simple - Shard 10 完成  33 个任务，总计素数:   190301, 耗时:   2505ms, 平均每个任务:   75ms
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - === 工作窃取模式统计结果 ===
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 总计算范围: [1, 100000000]
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 总任务数: 1000
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 总共找到素数: 5761455
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 素数密度: 5.761455%
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 程序总耗时: 2507ms
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 计算性能: 39888.31 个数字/毫秒
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 素数发现率: 2298.15 个素数/毫秒
+INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 任务完成
 ```
 
 # Resources
