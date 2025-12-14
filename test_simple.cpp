@@ -94,7 +94,7 @@ ss::future<size_t> count_primes_on_shard(int shard_id) {
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-        app_log.info("Shard {:2} [{:10}, {:10}] 发现{:8}个素数，耗时{:8}ms", 
+        app_log.info("Shard {:2} [{:10}, {:10}] 发现{:8}个素数，耗时{:6}ms", 
                      shard_id, start, end, total_primes, duration.count());
         return total_primes;
     });
