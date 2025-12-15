@@ -2,3 +2,12 @@
     path = seastar
     url = https://github.com/scylladb/seastar.git
     ignore = dirty
+[submodule "3rdparty/smf"]
+	path = 3rdparty/smf
+	url = https://github.com/smfrpc/smf.git
+[submodule "3rdparty/redpanda"]
+	path = 3rdparty/redpanda
+	url = https://github.com/redpanda-data/redpanda.git
+[submodule "3rdparty/scylladb"]
+	path = 3rdparty/scylladb
+	url = https://github.com/scylladb/scylladb.git
