@@ -88,7 +88,7 @@ ss::future<size_t> count_primes_on_shard(int shard_id) {
         size_t tasks_completed = 0;
         auto start_time = std::chrono::high_resolution_clock::now();
         
-        app_log.info("Shard {:2} 开始工作窃取", shard_id);
+        //app_log.info("Shard {:2} 开始工作窃取", shard_id);
         
         // 真正的工作窃取：每个shard独立获取任务
         while (true) {
