@@ -18,7 +18,7 @@
 #include <iomanip>
 
 namespace ss = seastar;
-static ss::logger app_log("test_simple");
+static ss::logger app_log("prime_bench");
 
 // 工作窃取模式的任务队列
 struct Task {

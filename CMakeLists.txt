@@ -12,5 +12,5 @@ target_link_libraries(big_file_splitter Seastar::seastar)
 add_executable(prime_calculator prime_calculator.cpp)
 target_link_libraries(prime_calculator Seastar::seastar)
 
-add_executable(test_simple test_simple.cpp)
-target_link_libraries(test_simple Seastar::seastar)
+add_executable(prime_bench prime_bench.cpp)
+target_link_libraries(prime_bench Seastar::seastar)
