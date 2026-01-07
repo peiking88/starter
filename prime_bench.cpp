@@ -15,6 +15,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <numeric>
 #include <iomanip>
 
 namespace ss = seastar;
@@ -210,7 +211,8 @@ ss::future<> async_task(int total_tasks_param, int numbers_per_task_param) {
     next_task_id.store(0);
 
     // 包含所有shard（包括shard 0）
-    boost::integer_range<int> shards(0, ss::smp::count);
+    std::vector<int> shards(ss::smp::count);
+    std::iota(shards.begin(), shards.end(), 0);
 
     return ss::map_reduce(
              shards,
@@ -278,8 +280,11 @@ ss::future<> compare_performance(int total_tasks_param, int numbers_per_task_par
     app_log.info("开始并行计算...");
     auto parallel_start = std::chrono::high_resolution_clock::now();
     
+    std::vector<int> shards(ss::smp::count);
+    std::iota(shards.begin(), shards.end(), 0);
+    
     return ss::map_reduce(
-             boost::integer_range<int>(0, ss::smp::count),
+             shards,
              [](int shard_id) {
                  return ss::smp::submit_to(shard_id, [shard_id] {
                      return count_primes_on_shard(shard_id);

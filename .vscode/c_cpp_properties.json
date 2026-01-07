@@ -1,16 +1,16 @@
 {
     "configurations": [
         {
-            "name": "Linux-GCC-11",
-            "compilerPath": "/usr/bin/g++-11", // 关键：指定编译器
+            "name": "Linux-GCC-15",
+            "compilerPath": "/usr/bin/g++", // 关键：指定编译器
             "includePath": [
                 // 1. 编译器自动发现的标准库路径（由compilerPath派生，通常无需手动添加）
                 "${workspaceFolder}/**", // 项目文件
                 // 2. 如果你想显式添加或使用其他版本的头文件，可在此添加
-                "/usr/include/c++/11",
-                "/usr/include/x86_64-linux-gnu/c++/11",
-                "/usr/include/c++/11/backward",
-                "/usr/lib/gcc/x86_64-linux-gnu/11/include",
+                "/usr/include/c++/15",
+                "/usr/include/x86_64-linux-gnu/c++/15",
+                "/usr/include/c++/15/backward",
+                "/usr/lib/gcc/x86_64-linux-gnu/15/include",
                 "/usr/local/include",
                 "/usr/include/x86_64-linux-gnu",
                 "/usr/include"

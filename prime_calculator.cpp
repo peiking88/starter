@@ -14,6 +14,9 @@
 #include <seastar/util/backtrace.hh>
 #include <seastar/util/log.hh>
 
+#include <numeric>
+#include <vector>
+
 #include <atomic>
 #include <cmath>
 #include <vector>
@@ -160,7 +163,8 @@ ss::future<> async_task(int total_tasks_param) {
     next_task_id.store(0);
     
     // 包含所有shard（包括shard 0）
-    boost::integer_range<int> shards(0, ss::smp::count);
+    std::vector<int> shards(ss::smp::count);
+    std::iota(shards.begin(), shards.end(), 0);
 
     return ss::map_reduce(
              shards,
