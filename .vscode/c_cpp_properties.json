@@ -2,11 +2,10 @@
     "configurations": [
         {
             "name": "Linux-GCC-15",
-            "compilerPath": "/usr/bin/g++", // 关键：指定编译器
+            "compilerPath": "/usr/bin/g++",
             "includePath": [
-                // 1. 编译器自动发现的标准库路径（由compilerPath派生，通常无需手动添加）
-                "${workspaceFolder}/**", // 项目文件
-                // 2. 如果你想显式添加或使用其他版本的头文件，可在此添加
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/3rdparty/libfork/include",
                 "/usr/include/c++/15",
                 "/usr/include/x86_64-linux-gnu/c++/15",
                 "/usr/include/c++/15/backward",
@@ -19,7 +18,7 @@
             "cStandard": "c23",
             "cppStandard": "gnu++23",
             "intelliSenseMode": "linux-gcc-x64",
-            "configurationProvider": "ms-vscode.cmake-tools" // 如果使用CMake则保留
+            "configurationProvider": "ms-vscode.cmake-tools"
         }            
     ],
     "version": 4

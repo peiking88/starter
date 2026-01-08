@@ -109,6 +109,36 @@ INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 素数发现率: 229
 INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 任务完成
 ```
 
+# libfork 并行素数计算
+
+基于 [libfork](https://github.com/ConorWilliams/libfork) 框架重构的并行素数计算程序，采用现代 C++23 协程和 fork-join 并行模型。
+
+## 特性
+
+- **fork-join 并行模型**: 利用 libfork 的 `lf::fork` 和 `lf::join` 实现递归分治
+- **工作窃取调度**: 通过 `lf::lazy_pool` 自动实现负载均衡
+- **可配置粒度**: 支持调整任务分割粒度以优化性能
+- **性能对比**: 内置与顺序计算的加速比分析
+
+## 运行示例
+
+```bash
+$ build/prime_bench_lf -n 20000000 -t 8 -g 100000
+```
+
+```
+=== libfork 并行素数计算基准测试 ===
+计算范围: [1, 20000000]
+线程数: 8
+任务粒度: 100000
+
+=== 性能比较结果 ===
+结果一致性: ✓ 通过
+libfork 并行:       320ms
+顺序(简单版):      2150ms
+加速比: 6.72x
+```
+
 # Resources
 
 * [The Seastar tutorial](https://github.com/scylladb/seastar/blob/master/doc/tutorial.md)
