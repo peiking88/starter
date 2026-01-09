@@ -111,7 +111,7 @@ INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 任务完成
 
 # libfork 并行素数计算
 
-基于 [libfork](https://github.com/ConorWilliams/libfork) 框架重构的并行素数计算程序，采用现代 C++23 协程和 fork-join 并行模型。
+基于 [libfork](https://github.com/ConorWilliams/libfork) 框架的并行素数计算程序，将多线程实现重构为使用 C++23 协程的 fork-join 并行模式，通过递归分割任务实现自动负载均衡，保持 `-t`（任务数）和 `-n`（区间大小）参数接口不变。
 
 ## 特性
 
