@@ -12,23 +12,82 @@ Install dependencies:
 
 ```bash
 $> git submodule update --init --recursive
-$> seastar/install-dependencies.sh
+$> 3rdparty/seastar/install-dependencies.sh
 $> apt-get install -qq ninja-build clang
 ```
 
 Configure and build:
 
-```
-$> cmake -Bbuild -S. -GNinja
-$> ninja -C build
+```bash
+# 清理并重新构建
+$> rm -rf build && mkdir build
+
+# 配置项目（支持并行编译和屏蔽警告）
+$> cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# 并行编译（使用所有CPU核心）
+$> make -j$(nproc)
 ```
 
 Or if you need to specify a non-default compiler:
 
-```
+```bash
 $> CC=clang CXX=clang++ cmake -Bbuild -S. -GNinja
 $> ninja -C build
 ```
+
+## 项目配置更新说明
+
+### 任务提示词
+
+该项目将seastar依赖包从项目根目录移动到了3rdparty目录下，按以下要求重新配置项目：
+
+```
+#不得修改3rdparty目录下源文件，可以修改项目配置文件。
+#修改项目配置，屏蔽生成过程中将警告信息认定为错误的配置。
+#生成时使用-j$(nproc)参数加快编译速度。
+#配置seastar只生成库文件而不生成其他可执行文件。
+#生成成功后将任务提示词、工作内容总结和生成命令更新到readme.md。
+#持续报告任务进度。
+```
+
+### 配置变更总结
+
+1. **依赖包位置调整**
+   - Seastar 依赖包已从项目根目录移动到 `3rdparty/seastar`
+   - 所有依赖包统一管理在 `3rdparty` 目录下
+
+2. **编译配置优化**
+   - 屏蔽警告信息认定为错误的配置：`-w -Wno-error`
+   - 保持原有优化级别：`-O2` 优化
+   - 配置 seastar 只生成库文件而不生成其他可执行文件
+
+3. **并行编译支持**
+   - 支持使用 `-j$(nproc)` 参数进行并行编译
+
+4. **依赖库配置修复**
+   - 正确配置 libfork 库依赖
+   - 正确配置 taskflow 头文件库（纯头文件库，无需编译）
+
+### 生成命令
+
+```bash
+# 清理并重新构建
+rm -rf build && mkdir build
+
+# 配置项目（支持并行编译和屏蔽警告）
+cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# 并行编译（使用所有CPU核心）
+make -j$(nproc)
+```
+
+### 生成的可执行文件
+
+构建成功后，将在 `build/` 目录下生成以下可执行文件：
+- `big_file_splitter` - 大文件分割器
+- `prime_calculator` - 素数计算器
+- `prime_bench` - 并行素数计算基准测试器
 
 # Requirements
 

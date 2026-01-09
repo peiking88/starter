@@ -4,6 +4,6 @@ Makefile
 cmake_install.cmake
 main
 compile_commands.json
-build
-seastar
+build/
+*.so
 .*.swp

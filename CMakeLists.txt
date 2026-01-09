@@ -1,11 +1,33 @@
 cmake_minimum_required(VERSION 3.14)
 project(seastar-starter VERSION 0.0.1 LANGUAGES CXX)
 
+# 设置C++23标准
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -fno-omit-frame-pointer -rdynamic -w")
+
+# 优化编译配置
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -fno-omit-frame-pointer -rdynamic")
+
+# 屏蔽将警告信息认定为错误的配置
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w -Wno-error")
 
 # ========== Seastar 相关目标 ==========
-add_subdirectory(seastar)
+# 配置seastar只生成库文件，不生成tests、demos、apps
+set(Seastar_APPS OFF CACHE BOOL "Disable application targets" FORCE)
+set(Seastar_DEMOS OFF CACHE BOOL "Disable demonstration targets" FORCE)
+set(Seastar_TESTING OFF CACHE BOOL "Disable testing targets" FORCE)
+set(Seastar_MASTER_PROJECT OFF CACHE BOOL "Disable master project mode" FORCE)
+add_subdirectory(3rdparty/seastar)
+
+# ========== libfork 相关目标 ==========
+add_subdirectory(3rdparty/libfork)
+
+# ========== taskflow 头文件库 ==========
+# taskflow 是纯头文件库，不需要编译，只需包含路径
+include_directories(${CMAKE_SOURCE_DIR}/3rdparty/taskflow)
 
 add_executable(big_file_splitter big_file_splitter.cpp)
 target_link_libraries(big_file_splitter Seastar::seastar)
@@ -15,8 +37,4 @@ target_link_libraries(prime_calculator Seastar::seastar)
 
 add_executable(prime_bench prime_bench.cpp)
 target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
-target_compile_features(prime_bench PRIVATE cxx_std_23)
-target_include_directories(prime_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/taskflow)
-
-# ========== libfork 相关目标 ==========
-add_subdirectory(3rdparty/libfork)
+# taskflow 是头文件库，已在 include_directories 中包含，不需要链接
