@@ -404,13 +404,23 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     
     // 并行版本之间的对比
     if (results[0].duration_ms > 0 && results[1].duration_ms > 0) {
-        double relative_speed = static_cast<double>(results[1].duration_ms) / results[0].duration_ms;
-        if (relative_speed > 1.0) {
-            app_log.info("Seastar 比 libfork 快 {:.2f} 倍", relative_speed);
-        } else if (relative_speed < 1.0) {
-            app_log.info("libfork 比 Seastar 快 {:.2f} 倍", 1.0 / relative_speed);
+        double relative_speedup = static_cast<double>(results[1].duration_ms) / results[0].duration_ms;
+        double percentage_diff = ((results[1].duration_ms - results[0].duration_ms) / results[0].duration_ms) * 100;
+        
+        app_log.info("并行框架对比:");
+        app_log.info("  Seastar耗时: {}ms", results[0].duration_ms);
+        app_log.info("  libfork耗时: {}ms", results[1].duration_ms);
+        app_log.info("  耗时差异: {:.2f}%", percentage_diff);
+        
+        // 添加阈值判断，避免微小差异造成误导
+        const double SIGNIFICANT_THRESHOLD = 0.05; // 5%的差异阈值
+        
+        if (percentage_diff > SIGNIFICANT_THRESHOLD) {
+            app_log.info("Seastar比libfork快 {:.2f}% ({:.2f}x)", percentage_diff * 100, relative_speedup);
+        } else if (percentage_diff < -SIGNIFICANT_THRESHOLD) {
+            app_log.info("libfork比Seastar快 {:.2f}% ({:.2f}x)", (-percentage_diff) * 100, 1.0 / relative_speedup);
         } else {
-            app_log.info("Seastar 和 libfork 性能相当");
+            app_log.info("两者性能差异在 {:.2f}% 阈值范围内，视为性能相当", SIGNIFICANT_THRESHOLD * 100);
         }
     }
     
