@@ -1,14 +1,4 @@
-#include <seastar/core/app-template.hh>
-#include <seastar/core/map_reduce.hh>
-#include <seastar/core/smp.hh>
-#include <seastar/core/thread.hh>
-#include <seastar/core/when_all.hh>
-#include <seastar/util/backtrace.hh>
-#include <seastar/util/log.hh>
-
-#include <libfork/core.hpp>
-#include <libfork/schedule.hpp>
-
+// Standard library headers
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -20,6 +10,18 @@
 #include <vector>
 #include <numeric>
 #include <iomanip>
+
+// Third-party library headers
+#include <libfork/core.hpp>
+#include <libfork/schedule.hpp>
+
+#include <seastar/core/app-template.hh>
+#include <seastar/core/map_reduce.hh>
+#include <seastar/core/smp.hh>
+#include <seastar/core/thread.hh>
+#include <seastar/core/when_all.hh>
+#include <seastar/util/backtrace.hh>
+#include <seastar/util/log.hh>
 
 namespace ss = seastar;
 namespace lf = ::lf;
