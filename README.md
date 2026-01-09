@@ -109,35 +109,72 @@ INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 素数发现率: 229
 INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - 任务完成
 ```
 
-# libfork 并行素数计算
+# prime_bench - 并行素数计算基准测试
 
-基于 [libfork](https://github.com/ConorWilliams/libfork) 框架的并行素数计算程序，将多线程实现重构为使用 C++23 协程的 fork-join 并行模式，通过递归分割任务实现自动负载均衡，保持 `-t`（任务数）和 `-n`（区间大小）参数接口不变。
+并行素数计算基准测试程序，支持三种实现方式：Seastar、libfork 和顺序计算，用于比较不同并行框架的性能。
 
 ## 特性
 
-- **fork-join 并行模型**: 利用 libfork 的 `lf::fork` 和 `lf::join` 实现递归分治
-- **工作窃取调度**: 通过 `lf::lazy_pool` 自动实现负载均衡
-- **可配置粒度**: 支持调整任务分割粒度以优化性能
-- **性能对比**: 内置与顺序计算的加速比分析
+- **多框架支持**: 同时支持 Seastar（基于事件驱动）和 libfork（基于C++23协程）两种并行框架
+- **统一接口**: 三种实现使用相同的命令行参数 `-t`（任务数）和 `-n`（区间大小）
+- **自动对比**: 依次执行三种版本并输出性能对比结果
+- **结果验证**: 自动验证三种实现的结果一致性
 
 ## 运行示例
 
 ```bash
-$ build/prime_bench_lf -n 20000000 -t 8 -g 100000
+$ build/prime_bench -t 4 -n 1000000 -c2  # 4个任务，每个100万，使用2个核心
 ```
 
+输出示例：
 ```
-=== libfork 并行素数计算基准测试 ===
-计算范围: [1, 20000000]
-线程数: 8
-任务粒度: 100000
+INFO  prime_bench - === 综合性能比较测试 ===
+INFO  prime_bench - 计算范围: [1, 4000000]
+INFO  prime_bench - 任务数: 4
+INFO  prime_bench - 区间大小: 1000000
+INFO  prime_bench -
+INFO  prime_bench - 开始 Seastar 并行计算...
+INFO  prime_bench - === Seastar 计算结果 ===
+INFO  prime_bench - 质数总数: 283146
+INFO  prime_bench - 计算耗时: 150ms
+INFO  prime_bench -
+INFO  prime_bench - 开始 libfork 并行计算...
+INFO  prime_bench - === libfork 计算结果 ===
+INFO  prime_bench - 质数总数: 283146
+INFO  prime_bench - 计算耗时: 173ms
+INFO  prime_bench -
+INFO  prime_bench - 开始顺序计算...
+INFO  prime_bench - === 顺序计算结果 ===
+INFO  prime_bench - 质数总数: 283146
+INFO  prime_bench - 计算耗时: 267ms
+INFO  prime_bench -
+INFO  prime_bench - === 性能比较总结 ===
+INFO  prime_bench - 计算范围: [1, 4000000]
+INFO  prime_bench - 任务数: 4, 区间大小: 1000000
+INFO  prime_bench -
+INFO  prime_bench - 结果一致性: 通过
+INFO  prime_bench -   - Seastar: 283146
+INFO  prime_bench -   - libfork: 283146
+INFO  prime_bench -   - Sequential: 283146
+INFO  prime_bench -
+INFO  prime_bench - Seastar: 150ms
+INFO  prime_bench - libfork: 173ms
+INFO  prime_bench - Sequential: 267ms
+INFO  prime_bench -
+INFO  prime_bench - Seastar 加速比: 1.78x
+INFO  prime_bench - Seastar 比顺序计算快 1.78 倍
+INFO  prime_bench - libfork 加速比: 1.54x
+INFO  prime_bench - libfork 比顺序计算快 1.54 倍
+INFO  prime_bench - Seastar 比 libfork 快 1.15 倍
+```
 
-=== 性能比较结果 ===
-结果一致性: ✓ 通过
-libfork 并行:       320ms
-顺序(简单版):      2150ms
-加速比: 6.72x
-```
+## 参数说明
+
+- `-t, --tasks <N>`: 任务数（默认: 4）
+- `-n, --chunk-size <N>`: 每个任务的区间大小（默认: 5000000）
+- 总计算范围 = 任务数 × 区间大小
+
+例如：`-t 8 -n 2500000` 将计算 8 × 2500000 = 20000000 以内的素数
 
 # Resources
 
