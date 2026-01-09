@@ -19,7 +19,3 @@ target_compile_features(prime_bench PRIVATE cxx_std_23)
 
 # ========== libfork 相关目标 ==========
 add_subdirectory(3rdparty/libfork)
-
-add_executable(prime_bench_lf prime_bench_lf.cpp)
-target_link_libraries(prime_bench_lf PRIVATE libfork::libfork)
-target_compile_features(prime_bench_lf PRIVATE cxx_std_23)
