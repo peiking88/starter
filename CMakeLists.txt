@@ -16,6 +16,7 @@ target_link_libraries(prime_calculator Seastar::seastar)
 add_executable(prime_bench prime_bench.cpp)
 target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
 target_compile_features(prime_bench PRIVATE cxx_std_23)
+target_include_directories(prime_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/taskflow)
 
 # ========== libfork 相关目标 ==========
 add_subdirectory(3rdparty/libfork)
