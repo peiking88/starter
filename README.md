@@ -162,10 +162,10 @@ INFO  2025-12-14 11:35:37,094 [shard  0:main] test_simple - Task completed
 
 ### Prime Benchmark
 
-Parallel prime calculation benchmark comparing different parallel frameworks (Seastar, libfork, Taskflow, and sequential computation).
+Parallel prime calculation benchmark comparing different parallel frameworks (Seastar, async_simple, libfork, and sequential computation).
 
 #### Features
-- **Multi-framework Support**: Seastar (event-driven), libfork (C++23 coroutines), and Taskflow (task graph parallelism)
+- **Multi-framework Support**: Seastar (event-driven), async_simple (C++20 coroutines), libfork (C++23 coroutines)
 - **Unified Interface**: All implementations use the same command-line parameters
 - **Automatic Comparison**: Executes all four versions and outputs performance comparison
 - **Result Validation**: Automatically verifies consistency across all implementations

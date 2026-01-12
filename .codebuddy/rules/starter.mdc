@@ -1,0 +1,112 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-01-12T06:44:58.069Z
+provider: 
+---
+
+# Seastar Starter项目技能
+
+## 项目概述
+这是一个高性能C++并行计算项目，基于Seastar框架，支持多种并行计算框架的性能对比。
+
+## 技术栈
+- **语言**: C++23
+- **框架**: Seastar (事件驱动)、libfork (协程)、Taskflow (任务图)
+- **构建**: CMake 3.14+
+- **编译器**: GCC 15+ 或 Clang 14+
+
+## 可用程序
+- **big_file_splitter**: 大文件并行分割器
+- **prime_calculator**: 素数并行计算器
+- **prime_bench**: 多框架性能基准测试
+
+## 构建命令
+
+### 快速构建
+```bash
+# 清理并重新构建
+rm -rf build && mkdir build
+cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+```
+
+### 调试构建
+```bash
+cmake -Bbuild -S. -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc) -C build
+```
+
+### Ninja构建
+```bash
+CC=clang CXX=clang++ cmake -Bbuild -S. -GNinja
+ninja -C build
+```
+
+## 依赖管理
+```bash
+# 初始化子模块
+git submodule update --init --recursive
+
+# Seastar依赖
+./3rdparty/seastar/install-dependencies.sh
+```
+
+## 测试与验证
+
+### 运行所有程序
+```bash
+# 确保已构建
+cd build
+
+# 测试文件分割器
+dd if=/dev/zero of=input.dat bs=4096 count=50000
+./big_file_splitter --input ../input.dat -m500 -c5 --memory-pct 1.0
+
+# 测试素数计算器
+./prime_calculator -t 1000
+
+# 运行性能基准测试
+./prime_bench -t 8 -n 2500000 -c4
+```
+
+### 验证结果一致性
+```bash
+cd build
+./prime_bench -t 4 -n 1000000 -c2
+# 验证输出中的"Result consistency: PASSED"
+```
+
+### 性能分析
+```bash
+# 使用不同参数测试性能
+./prime_bench -t 16 -n 1250000 -c8
+./prime_bench -t 32 -n 625000 -c16
+```
+
+### 清理测试文件
+```bash
+rm -f input.dat chunk.*
+```
+
+## 开发规范
+- 使用C++23标准特性
+- 遵循Seastar异步编程模式
+- 保持并行算法的正确性和性能
+- 所有实现需通过一致性验证
+
+## 测试要求
+- 所有并行实现必须产生相同结果
+- 性能基准测试需包含多框架对比
+- 内存使用需优化避免OOM
+
+## 工具使用建议
+- **频繁使用**: Read、Bash、Execute、Search
+- **推荐自动允许**: Read、Bash、Execute
+- **特定任务**: C++代码分析、性能优化建议
+
+## 快速启动
+1. 初始化依赖: `git submodule update --init --recursive && ./3rdparty/seastar/install-dependencies.sh`
+2. 构建项目: `rm -rf build && mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)`
+3. 运行测试: `./prime_bench -t 8 -n 2500000 -c4`
