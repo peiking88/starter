@@ -24,19 +24,8 @@
 #include <seastar/util/backtrace.hh>
 #include <seastar/util/log.hh>
 
-// async_simple headers
-#include "async_simple/coro/Lazy.h"
-#include "async_simple/coro/Collect.h"
-#include "async_simple/coro/SyncAwait.h"
-#include "async_simple/executors/SimpleExecutor.h"
-#include "async_simple/Collect.h"
-#include "async_simple/util/ThreadPool.h"
-#include "async_simple/uthread/Async.h"
-#include "async_simple/uthread/Await.h"
-
 namespace ss = seastar;
 namespace lf = ::lf;
-namespace as = async_simple;
 static ss::logger app_log("prime_bench");
 
 // 全局任务计数器（线程安全）
@@ -75,6 +64,7 @@ inline size_t count_primes_in_range(int start, int end) {
         }
         if (is_prime) count++;
     }
+            
     return count;
 }
 
@@ -108,6 +98,8 @@ inline constexpr auto parallel_prime_count_libfork =
     
     co_return left_count + right_count;
 };
+
+
 
 // 顺序计算质数（与test_sequential相同的功能）
 ss::future<std::pair<size_t, long>> sequential_prime_count(int max_number) {
@@ -170,7 +162,7 @@ ss::future<size_t> count_primes_on_shard(int shard_id) {
 
             total_primes += batch_primes;
 
-            // 每完成5个任务输出一次进度
+            //每完成5个任务输出一次进度
             // if (tasks_completed % 5 == 0) {
             //     app_log.info(
             //       "Shard {:2} 已完成 {:3} 个任务，当前累计素数: {:8}",
@@ -245,66 +237,7 @@ ss::future<> async_task(int total_tasks_param, int numbers_per_task_param) {
       });
 }
 
-// async_simple 并行计算 - 使用协程实现真正的动态任务分配
-namespace async_simple_optimized {
-    
-    // 使用async_simple的协程Lazy实现真正的并行计算，每个工作线程一个协程，动态获取任务
-    size_t run_async_simple_version(int num_tasks, int chunk_size, int num_threads) {
-        // 创建执行器，使用指定数量的线程
-        async_simple::executors::SimpleExecutor executor(static_cast<size_t>(num_threads));
-        
-        // 原子计数器用于任务分配
-        std::atomic<int> next_task_id{0};
-        // 原子累加器用于素数总数
-        std::atomic<size_t> total_primes{0};
-        
-        // 定义工作协程函数，每个协程负责动态获取任务
-        auto worker_coroutine = [&]() -> async_simple::coro::Lazy<void> {
-            size_t local_primes = 0;
-            
-            // 动态获取任务 - 协程内部循环
-            while (true) {
-                int task_id = next_task_id.fetch_add(1, std::memory_order_relaxed);
-                if (task_id >= num_tasks) {
-                    break;
-                }
-                
-                int start = task_id * chunk_size + 1;
-                int end = (task_id + 1) * chunk_size;
-                local_primes += count_primes_in_range(start, end);
-            }
-            
-            // 累加到全局总数
-            total_primes.fetch_add(local_primes, std::memory_order_relaxed);
-            co_return;
-        };
-        
-        // 顶级协程：绑定执行器，并行启动所有工作协程
-        auto main_coroutine = [&]() -> async_simple::coro::Lazy<size_t> {
-            // 创建与线程数相同的工作协程
-            std::vector<async_simple::coro::Lazy<void>> worker_tasks;
-            worker_tasks.reserve(num_threads);
-            for (int i = 0; i < num_threads; ++i) {
-                worker_tasks.push_back(worker_coroutine());
-            }
-            
-            // 并行执行所有工作协程
-            co_await async_simple::coro::collectAllPara(std::move(worker_tasks));
-            
-            // 返回累加结果
-            co_return total_primes.load(std::memory_order_relaxed);
-        };
-        
-        // 执行顶级协程并返回结果
-        return async_simple::coro::syncAwait(main_coroutine().via(&executor));
-    }
-    
-} // namespace async_simple_optimized
 
-// 导出优化后的async_simple版本
-size_t run_async_simple_version(int num_tasks, int chunk_size, int num_threads) {
-    return async_simple_optimized::run_async_simple_version(num_tasks, chunk_size, num_threads);
-}
 
 // 执行 libfork 版本计算
 size_t run_libfork_version(int num_tasks, int chunk_size, int num_threads) {
@@ -318,7 +251,7 @@ size_t run_sequential_version(int max_number) {
     return count_primes_in_range(2, max_number);
 }
 
-// 执行四种版本的性能测试：Seastar、async_simple、libfork、Sequential
+// 执行三种版本的性能测试：Seastar、libfork、Sequential
 ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     int max_number = num_tasks * chunk_size;
     int num_threads = static_cast<int>(std::thread::hardware_concurrency());
@@ -330,7 +263,7 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     app_log.info("工作线程数: {}", num_threads);
     app_log.info("");
     
-    // 存储四种实现的结果和耗时
+    // 存储三种实现的结果和耗时
     struct Result {
         size_t primes;
         long duration_ms;
@@ -393,21 +326,7 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     app_log.info("计算耗时: {}ms", libfork_duration.count());
     app_log.info("");
     
-    // 3. async_simple 版本
-    app_log.info("开始 async_simple 并行计算...");
-    auto async_simple_start = std::chrono::high_resolution_clock::now();
-    size_t async_simple_primes = run_async_simple_version(num_tasks, chunk_size, num_threads);
-    auto async_simple_end = std::chrono::high_resolution_clock::now();
-    auto async_simple_duration = std::chrono::duration_cast<std::chrono::milliseconds>(async_simple_end - async_simple_start);
-    
-    results.push_back({async_simple_primes, async_simple_duration.count(), "async_simple"});
-    
-    app_log.info("=== async_simple 计算结果 ===");
-    app_log.info("质数总数: {}", async_simple_primes);
-    app_log.info("计算耗时: {}ms", async_simple_duration.count());
-    app_log.info("");
-    
-    // 4. 顺序版本
+    // 3. 顺序版本
     app_log.info("开始顺序计算...");
     auto sequential_start = std::chrono::high_resolution_clock::now();
     size_t sequential_primes = count_primes_in_range(2, max_number);
@@ -448,9 +367,9 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     app_log.info("");
     
     // 计算加速比
-    if (results[3].duration_ms > 0) {  // 以顺序版本为基准
-        for (size_t i = 0; i < 3; i++) {
-            double speedup = static_cast<double>(results[3].duration_ms) / results[i].duration_ms;
+    if (results[2].duration_ms > 0) {  // 以顺序版本为基准
+        for (size_t i = 0; i < 2; i++) {
+            double speedup = static_cast<double>(results[2].duration_ms) / results[i].duration_ms;
             app_log.info("{} 加速比: {:.2f}x", results[i].name, speedup);
             
             if (speedup > 1.0) {
@@ -464,24 +383,9 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     // 并行版本之间的对比
     const double SIGNIFICANT_THRESHOLD = 0.05; // 5%的差异阈值
     
-    // Seastar vs async_simple
+    // Seastar vs libfork
     if (results[0].duration_ms > 0 && results[1].duration_ms > 0) {
         double diff = ((results[0].duration_ms - results[1].duration_ms) / results[1].duration_ms) * 100;
-        
-        if (std::abs(diff) > SIGNIFICANT_THRESHOLD * 100) {
-            if (diff > 0) {
-                app_log.info("async_simple 比 Seastar 快 {:.2f}%", diff);
-            } else {
-                app_log.info("Seastar 比 async_simple 快 {:.2f}%", -diff);
-            }
-        } else {
-            app_log.info("Seastar 和 async_simple 性能相当");
-        }
-    }
-    
-    // Seastar vs libfork
-    if (results[0].duration_ms > 0 && results[2].duration_ms > 0) {
-        double diff = ((results[0].duration_ms - results[2].duration_ms) / results[2].duration_ms) * 100;
         
         if (std::abs(diff) > SIGNIFICANT_THRESHOLD * 100) {
             if (diff > 0) {
@@ -494,31 +398,16 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
         }
     }
     
-    // async_simple vs libfork
-    if (results[1].duration_ms > 0 && results[2].duration_ms > 0) {
-        double diff = ((results[1].duration_ms - results[2].duration_ms) / results[2].duration_ms) * 100;
-        
-        if (std::abs(diff) > SIGNIFICANT_THRESHOLD * 100) {
-            if (diff > 0) {
-                app_log.info("libfork 比 async_simple 快 {:.2f}%", diff);
-            } else {
-                app_log.info("async_simple 比 libfork 快 {:.2f}%", -diff);
-            }
-        } else {
-            app_log.info("async_simple 和 libfork 性能相当");
-        }
-    }
-    
     // 找出最快的并行框架
-    if (results.size() >= 3) {
-        auto fastest = std::min_element(results.begin(), results.begin() + 3, 
+    if (results.size() >= 2) {
+        auto fastest = std::min_element(results.begin(), results.begin() + 2, 
             [](const Result& a, const Result& b) { return a.duration_ms < b.duration_ms; });
         
         app_log.info("最快的并行框架: {} ({}ms)", fastest->name, fastest->duration_ms);
         
         // 计算相对于顺序版本的性能提升
-        if (results[3].duration_ms > 0) {
-            double speedup = static_cast<double>(results[3].duration_ms) / fastest->duration_ms;
+        if (results[2].duration_ms > 0) {
+            double speedup = static_cast<double>(results[2].duration_ms) / fastest->duration_ms;
             app_log.info("并行框架整体比顺序计算快 {:.2f} 倍", speedup);
         }
     }
@@ -535,10 +424,9 @@ int main(int argc, char** argv) {
         std::cout << "\n参数说明:\n";
         std::cout << "  -t, --tasks <N>         任务数 (默认: 4)\n";
         std::cout << "  -n, --chunk-size <N>    区间大小 (默认: 5000000)\n";
-        std::cout << "\n说明: 程序将测试 Seastar、async_simple、libfork 和 Sequential 四种实现\n";
+        std::cout << "\n说明: 程序将测试 Seastar、libfork 和 Sequential 三种实现\n";
         std::cout << "\n并行框架说明:\n";
         std::cout << "  Seastar: 事件驱动框架，基于共享内存架构\n";
-        std::cout << "  async_simple: 阿里巴巴开源C++异步框架，基于C++20协程\n";
         std::cout << "  libfork: C++23协程框架，支持fork-join并行模式\n";
         std::cout << "  Sequential: 顺序计算，作为性能基准\n";
         std::cout << "\n示例:\n";

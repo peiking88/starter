@@ -25,10 +25,6 @@ add_subdirectory(3rdparty/seastar)
 # ========== libfork 相关目标 ==========
 add_subdirectory(3rdparty/libfork)
 
-# ========== async_simple 相关目标 ==========
-# async_simple 是头文件库，只需要包含头文件路径
-include_directories(3rdparty/async_simple)
-
 # ========== 自定义目标 ==========
 add_executable(big_file_splitter big_file_splitter.cpp)
 target_link_libraries(big_file_splitter Seastar::seastar)
@@ -38,7 +34,3 @@ target_link_libraries(prime_calculator Seastar::seastar)
 
 add_executable(prime_bench prime_bench.cpp)
 target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
-# 添加线程库依赖，async_simple需要pthread
-target_link_libraries(prime_bench pthread)
-# 添加libaio库依赖，async_simple的IOExecutor需要
-target_link_libraries(prime_bench aio)
