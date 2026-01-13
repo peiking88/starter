@@ -10,6 +10,7 @@
 #include <vector>
 #include <numeric>
 #include <iomanip>
+#include <latch>
 
 // Third-party library headers
 #include <libfork/core.hpp>
@@ -29,6 +30,9 @@
 #include "async_simple/coro/SyncAwait.h"
 #include "async_simple/executors/SimpleExecutor.h"
 #include "async_simple/Collect.h"
+#include "async_simple/util/ThreadPool.h"
+#include "async_simple/uthread/Async.h"
+#include "async_simple/uthread/Await.h"
 
 namespace ss = seastar;
 namespace lf = ::lf;
@@ -241,63 +245,58 @@ ss::future<> async_task(int total_tasks_param, int numbers_per_task_param) {
       });
 }
 
-// async_simple 并行计算 - 简化的高性能实现
+// async_simple 并行计算 - 使用协程实现真正的动态任务分配
 namespace async_simple_optimized {
     
-    // 使用async_simple的简化并行实现，避免协程开销
+    // 使用async_simple的协程Lazy实现真正的并行计算，每个工作线程一个协程，动态获取任务
     size_t run_async_simple_version(int num_tasks, int chunk_size, int num_threads) {
-        // 对于CPU密集型素数计算，使用原生线程池通常性能更好
-        // 这里我们使用类似原生线程池的实现，但保留async_simple的接口
+        // 创建执行器，使用指定数量的线程
+        async_simple::executors::SimpleExecutor executor(static_cast<size_t>(num_threads));
         
-        // 使用原子计数器实现动态任务分配
+        // 原子计数器用于任务分配
         std::atomic<int> next_task_id{0};
+        // 原子累加器用于素数总数
+        std::atomic<size_t> total_primes{0};
         
-        // 创建线程池
-        std::vector<std::thread> threads;
-        std::vector<size_t> thread_results(num_threads, 0);
-        
-        // 启动工作线程
-        for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
-            threads.emplace_back([&, thread_id]() {
-                size_t local_primes = 0;
-                
-                // 工作窃取循环
-                while (true) {
-                    // 原子获取任务ID
-                    int task_id = next_task_id.fetch_add(1, std::memory_order_relaxed);
-                    
-                    // 检查是否所有任务都已分配
-                    if (task_id >= num_tasks) {
-                        break;
-                    }
-                    
-                    // 计算任务区间
-                    int start = task_id * chunk_size + 1;
-                    int end = (task_id + 1) * chunk_size;
-                    
-                    // 直接计算素数，避免任何协程开销
-                    local_primes += count_primes_in_range(start, end);
+        // 定义工作协程函数，每个协程负责动态获取任务
+        auto worker_coroutine = [&]() -> async_simple::coro::Lazy<void> {
+            size_t local_primes = 0;
+            
+            // 动态获取任务 - 协程内部循环
+            while (true) {
+                int task_id = next_task_id.fetch_add(1, std::memory_order_relaxed);
+                if (task_id >= num_tasks) {
+                    break;
                 }
                 
-                // 存储线程结果
-                thread_results[thread_id] = local_primes;
-            });
-        }
-        
-        // 等待所有线程完成
-        for (auto& thread : threads) {
-            if (thread.joinable()) {
-                thread.join();
+                int start = task_id * chunk_size + 1;
+                int end = (task_id + 1) * chunk_size;
+                local_primes += count_primes_in_range(start, end);
             }
-        }
+            
+            // 累加到全局总数
+            total_primes.fetch_add(local_primes, std::memory_order_relaxed);
+            co_return;
+        };
         
-        // 汇总结果
-        size_t total_primes = 0;
-        for (size_t result : thread_results) {
-            total_primes += result;
-        }
+        // 顶级协程：绑定执行器，并行启动所有工作协程
+        auto main_coroutine = [&]() -> async_simple::coro::Lazy<size_t> {
+            // 创建与线程数相同的工作协程
+            std::vector<async_simple::coro::Lazy<void>> worker_tasks;
+            worker_tasks.reserve(num_threads);
+            for (int i = 0; i < num_threads; ++i) {
+                worker_tasks.push_back(worker_coroutine());
+            }
+            
+            // 并行执行所有工作协程
+            co_await async_simple::coro::collectAllPara(std::move(worker_tasks));
+            
+            // 返回累加结果
+            co_return total_primes.load(std::memory_order_relaxed);
+        };
         
-        return total_primes;
+        // 执行顶级协程并返回结果
+        return async_simple::coro::syncAwait(main_coroutine().via(&executor));
     }
     
 } // namespace async_simple_optimized
@@ -397,9 +396,7 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     // 3. async_simple 版本
     app_log.info("开始 async_simple 并行计算...");
     auto async_simple_start = std::chrono::high_resolution_clock::now();
-    
     size_t async_simple_primes = run_async_simple_version(num_tasks, chunk_size, num_threads);
-    
     auto async_simple_end = std::chrono::high_resolution_clock::now();
     auto async_simple_duration = std::chrono::duration_cast<std::chrono::milliseconds>(async_simple_end - async_simple_start);
     
@@ -440,7 +437,7 @@ ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
     }
     app_log.info("结果一致性: {}", all_consistent ? "通过" : "失败");
     for (const auto& result : results) {
-        app_log.info("  - {}: {}", result.name, result.primes);
+        app_log.info("{}: {}", result.name, result.primes);
     }
     app_log.info("");
     
