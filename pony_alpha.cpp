@@ -210,13 +210,13 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         std::cout << "用法: " << argv[0] << " -t <任务数> -c <区间大小> [seastar 参数]\n";
         std::cout << "\n参数说明:\n";
-        std::cout << "  -t, --tasks <N>      任务数 (默认: 20, 计算范围 [2, t*c])\n";
-        std::cout << "  -c, --chunk <N>      每个任务的区间大小 (默认: 100000)\n";
+        std::cout << "  -t, --tasks <N>      任务数 (默认: 20, 计算范围 [2, t*n])\n";
+        std::cout << "  -n, --chunk <N>      每个任务的区间大小 (默认: 100000)\n";
         std::cout << "  -o, --output <path>  输出CSV文件路径 (默认: primes.csv)\n";
         std::cout << "\n示例:\n";
-        std::cout << "  " << argv[0] << " -t 20 -c 100000       # 计算 2-2,000,000\n";
-        std::cout << "  " << argv[0] << " -t 100 -c 10000       # 计算 2-1,000,000\n";
-        std::cout << "  " << argv[0] << " -t 2000 -c 1000 -c4   # 2000任务, 每任务1000, 使用4个core\n";
+        std::cout << "  " << argv[0] << " -t 20 -n 100000       # 计算 2-2,000,000\n";
+        std::cout << "  " << argv[0] << " -t 100 -n 10000       # 计算 2-1,000,000\n";
+        std::cout << "  " << argv[0] << " -t 2000 -n 1000 -c4   # 2000任务, 每任务1000, 使用4个core\n";
         return 1;
     }
     
@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if ((arg == "-t" || arg == "--tasks") && i + 1 < argc) {
             num_tasks = std::atoi(argv[++i]);
-        } else if ((arg == "-c" || arg == "--chunk") && i + 1 < argc) {
+        } else if ((arg == "-n" || arg == "--chunk") && i + 1 < argc) {
             chunk_size = std::atoi(argv[++i]);
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             output_file = argv[++i];
