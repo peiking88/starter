@@ -15,9 +15,9 @@
 #include <iomanip>
 #include <string>
 
-// 配置常量
-constexpr uint64_t MAX_NUM = 2000000000ULL;      // 20亿
-constexpr uint64_t CHUNK_SIZE = 100000ULL;       // 每个区间最大10万
+// 配置常量（可通过命令行参数覆盖）
+uint64_t MAX_NUM = 2000000ULL;                   // 默认计算到200万
+uint64_t CHUNK_SIZE = 100000ULL;                 // 每个区间默认10万
 constexpr const char* OUTPUT_FILE = "primes.csv";
 
 // 任务结构
@@ -83,7 +83,7 @@ std::vector<uint64_t> compute_primes_in_range(uint64_t start, uint64_t end) {
 
 // ==================== 任务队列初始化函数 ====================
 
-void init_task_queue() {
+void init_task_queue(uint64_t max_num, uint64_t chunk_size) {
     auto& state = GlobalState::instance();
     
     // 清空队列（如果有的话）
@@ -92,8 +92,8 @@ void init_task_queue() {
     }
     
     // 生成所有任务区间
-    for (uint64_t start = 2; start <= MAX_NUM; start += CHUNK_SIZE) {
-        uint64_t end = std::min(start + CHUNK_SIZE - 1, MAX_NUM);
+    for (uint64_t start = 2; start <= max_num; start += chunk_size) {
+        uint64_t end = std::min(start + chunk_size - 1, max_num);
         state.task_queue.push({start, end});
     }
     
@@ -101,27 +101,14 @@ void init_task_queue() {
     state.completed_tasks = 0;
     
     std::cout << "=== 任务队列初始化完成 ===" << std::endl;
-    std::cout << "计算范围: 2 - " << MAX_NUM << std::endl;
-    std::cout << "区间大小: " << CHUNK_SIZE << std::endl;
+    std::cout << "计算范围: 2 - " << max_num << std::endl;
+    std::cout << "区间大小: " << chunk_size << std::endl;
     std::cout << "总任务数: " << state.total_tasks << std::endl;
     std::cout << "CPU核心数: " << seastar::smp::count << std::endl;
     std::cout << "========================" << std::endl;
 }
 
 // ==================== 输出计算结果函数 ====================
-
-void write_results_to_csv() {
-    auto& state = GlobalState::instance();
-    
-    state.output_file.open(OUTPUT_FILE);
-    if (!state.output_file.is_open()) {
-        std::cerr << "Error: 无法打开输出文件 " << OUTPUT_FILE << std::endl;
-        return;
-    }
-    
-    std::cout << "\n=== 开始写入结果文件 ===" << std::endl;
-    std::cout << "输出文件: " << OUTPUT_FILE << std::endl;
-}
 
 void close_output_file() {
     auto& state = GlobalState::instance();
@@ -132,7 +119,6 @@ void close_output_file() {
     
     std::cout << "\n=== 计算完成 ===" << std::endl;
     std::cout << "已完成任务: " << state.completed_tasks << "/" << state.total_tasks << std::endl;
-    std::cout << "结果已保存至: " << OUTPUT_FILE << std::endl;
 }
 
 // ==================== 任务管理函数 ====================
@@ -220,22 +206,73 @@ seastar::future<> process_tasks_on_core(unsigned int core_id) {
 // ==================== 主函数 ====================
 
 int main(int argc, char** argv) {
+    // 显示用法信息
+    if (argc < 2) {
+        std::cout << "用法: " << argv[0] << " -t <任务数> -c <区间大小> [seastar 参数]\n";
+        std::cout << "\n参数说明:\n";
+        std::cout << "  -t, --tasks <N>      任务数 (默认: 20, 计算范围 [2, t*c])\n";
+        std::cout << "  -c, --chunk <N>      每个任务的区间大小 (默认: 100000)\n";
+        std::cout << "  -o, --output <path>  输出CSV文件路径 (默认: primes.csv)\n";
+        std::cout << "\n示例:\n";
+        std::cout << "  " << argv[0] << " -t 20 -c 100000       # 计算 2-2,000,000\n";
+        std::cout << "  " << argv[0] << " -t 100 -c 10000       # 计算 2-1,000,000\n";
+        std::cout << "  " << argv[0] << " -t 2000 -c 1000 -c4   # 2000任务, 每任务1000, 使用4个core\n";
+        return 1;
+    }
+    
+    // 手动解析 -t, -c 和 -o 参数
+    int num_tasks = 20;
+    int chunk_size = 100000;
+    std::string output_file = OUTPUT_FILE;
+    
+    // 创建新参数列表，去掉已解析的参数供 seastar 使用
+    std::vector<char*> seastar_args;
+    seastar_args.push_back(argv[0]);
+    
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if ((arg == "-t" || arg == "--tasks") && i + 1 < argc) {
+            num_tasks = std::atoi(argv[++i]);
+        } else if ((arg == "-c" || arg == "--chunk") && i + 1 < argc) {
+            chunk_size = std::atoi(argv[++i]);
+        } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+            output_file = argv[++i];
+        } else {
+            seastar_args.push_back(argv[i]);
+        }
+    }
+    
+    if (num_tasks <= 0) num_tasks = 20;
+    if (chunk_size <= 0) chunk_size = 100000;
+    
+    // 计算实际的 MAX_NUM
+    uint64_t max_num = static_cast<uint64_t>(num_tasks) * chunk_size;
+    
+    std::cout << "配置: 任务数=" << num_tasks << ", 区间大小=" << chunk_size 
+              << ", 计算范围=[2, " << max_num << "]" << std::endl;
+    
+    // 将 seastar 参数转换回 char**
+    std::vector<char*> seastar_argv = seastar_args;
+    int seastar_argc = seastar_argv.size();
+    
     seastar::app_template app;
     
-    // 配置应用程序选项
-    app.add_options()
-        ("output,o", 
-         boost::program_options::value<std::string>()->default_value(OUTPUT_FILE),
-         "Output CSV file path");
-    
-    return app.run(argc, argv, [] {
+    return app.run(seastar_argc, seastar_argv.data(), [max_num, chunk_size, output_file] {
         // 确保在 core 0 上执行初始化
-        return seastar::smp::submit_to(0, [] {
+        return seastar::smp::submit_to(0, [max_num, chunk_size, output_file] {
             // 1. 初始化任务队列
-            init_task_queue();
+            init_task_queue(max_num, chunk_size);
             
             // 2. 初始化输出文件
-            write_results_to_csv();
+            GlobalState::instance().output_file.open(output_file);
+            if (!GlobalState::instance().output_file.is_open()) {
+                std::cerr << "Error: 无法打开输出文件 " << output_file << std::endl;
+                return seastar::make_ready_future<>();
+            }
+            std::cout << "\n=== 开始写入结果文件 ===" << std::endl;
+            std::cout << "输出文件: " << output_file << std::endl;
+            
+            return seastar::make_ready_future<>();
             
         }).then([] {
             // 3. 在所有核心上启动任务处理
