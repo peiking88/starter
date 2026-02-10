@@ -250,6 +250,12 @@ int main(int argc, char** argv) {
     std::vector<char*> seastar_args;
     seastar_args.push_back(argv[0]);
     
+    // 设置日志级别，过滤 io 警告（可选）
+    // static char log_level[] = "--logger-log-level";
+    // static char io_log[] = "io=error";
+    // seastar_args.push_back(log_level);
+    // seastar_args.push_back(io_log);
+    
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if ((arg == "-t" || arg == "--tasks") && i + 1 < argc) {
