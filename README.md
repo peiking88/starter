@@ -4,10 +4,11 @@ This project contains a small [Seastar](https://github.com/scylladb/seastar) pro
 
 ## Overview
 
-This project demonstrates Seastar's capabilities through three main applications:
+This project demonstrates Seastar's capabilities through four main applications:
 - **Big File Splitter**: Parallel file processing using Seastar's shard-based architecture
 - **Prime Calculator**: Parallel prime number counting with work-stealing optimization
 - **Prime Benchmark**: Performance comparison of different parallel frameworks (Seastar, libfork, Taskflow)
+- **Pony Alpha**: Distributed prime calculator with CSV output and detailed logging
 
 ## Project Configuration Update
 
@@ -93,6 +94,7 @@ After successful build, the following executables will be generated in `build/` 
 - `big_file_splitter` - Large file splitter
 - `prime_calculator` - Prime number calculator
 - `prime_bench` - Parallel prime calculation benchmark
+- `pony_alpha` - Distributed prime calculator with CSV output
 
 ## Running the Applications
 
@@ -226,4 +228,65 @@ INFO  prime_bench -   Seastar time: 764ms
 INFO  prime_bench -   libfork time: 888ms
 INFO  prime_bench -   Taskflow time: 2593ms
 INFO  prime_bench - Seastar is 200.00% faster than other parallel frameworks
+```
+
+### Pony Alpha
+
+Distributed prime calculator with detailed logging and CSV output. Demonstrates Seastar's multi-shard processing with task queue and work distribution.
+
+#### Features
+- **Multi-shard Processing**: Distributes tasks across all CPU cores
+- **CSV Output**: Saves results to CSV format (range, shard_id, prime_list)
+- **Progress Logging**: Real-time progress with prime count statistics
+- **Timing Stats**: Total execution time measurement
+- **Configurable Parameters**: Customizable task count and chunk size
+
+#### Example Usage
+```bash
+# Default: 20 tasks, 100000 chunk size, calculates 2-2,000,000
+./build/pony_alpha
+
+# Custom configuration: 100 tasks, 10000 chunk size, using 4 cores
+./build/pony_alpha -t 100 -n 10000 -c4 -m1G
+
+# Large calculation: 2000 tasks, 1000 chunk size
+./build/pony_alpha -t 2000 -n 1000 -c8 -m2G
+```
+
+**Command Line Arguments:**
+- `-t, --tasks <N>`: Number of tasks (default: 20)
+- `-n, --chunk <N>`: Numbers per task (default: 100000)
+- `-o, --output <path>`: Output CSV file (default: primes.csv)
+- `-c <N>`: Number of CPU cores to use (Seastar parameter)
+- `-m <size>`: Memory limit (Seastar parameter)
+
+#### Sample Output
+```
+配置: 任务数=20, 区间大小=5000, 计算范围=[2, 100000]
+
+INFO  seastar - Reactor backend: linux-aio
+INFO  pony_alpha - === 任务队列初始化完成 ===
+INFO  pony_alpha - 计算范围: 2 - 100000
+INFO  pony_alpha - 区间大小: 5000
+INFO  pony_alpha - 总任务数: 20
+INFO  pony_alpha - CPU核心数: 2
+INFO  pony_alpha - === 开始写入结果文件 ===
+INFO  pony_alpha - 输出文件: primes.csv
+INFO  pony_alpha - 进度: 100.00% (20/20 任务, 素数: 9592)
+INFO  pony_alpha - === 计算完成 ===
+INFO  pony_alpha - 已完成任务: 20/20
+INFO  pony_alpha - 素数总数: 9592
+INFO  pony_alpha - 总耗时: 8ms
+```
+
+#### Output Format
+The CSV file contains one line per task:
+```
+<start>-<end>,<shard_id>,<prime1>,<prime2>,<prime3>,...
+```
+
+Example:
+```
+2-5001,0,2,3,5,7,11,13,17,19,23,29,...
+5002-10001,1,5003,5009,5011,5021,5023,...
 ```

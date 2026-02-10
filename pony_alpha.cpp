@@ -48,6 +48,7 @@ public:
     std::ofstream output_file;            // 输出文件流
     uint64_t total_tasks = 0;             // 总任务数
     uint64_t completed_tasks = 0;         // 已完成任务数
+    uint64_t total_primes = 0;            // 素数总数
     
     static GlobalState& instance() {
         static GlobalState instance;
@@ -141,6 +142,7 @@ void close_output_file() {
 
     app_log.info("=== 计算完成 ===");
     app_log.info("已完成任务: {}/{}", state.completed_tasks, state.total_tasks);
+    app_log.info("素数总数: {}", state.total_primes);
 }
 
 // ==================== 任务管理函数 ====================
@@ -172,14 +174,16 @@ seastar::future<> write_result_to_csv(uint64_t start, uint64_t end,
     }
     state.output_file << "\n";
 
-    // 更新进度
+    // 更新进度和素数计数
     state.completed_tasks++;
+    state.total_primes += primes.size();
 
     // 每100个任务或完成时显示进度
     if (state.completed_tasks % 100 == 0 ||
         state.completed_tasks == state.total_tasks) {
         double progress = 100.0 * state.completed_tasks / state.total_tasks;
-        app_log.info("进度: {:.2f}% ({}/{} 任务)", progress, state.completed_tasks, state.total_tasks);
+        app_log.info("进度: {:.2f}% ({}/{} 任务, 素数: {})", 
+                     progress, state.completed_tasks, state.total_tasks, state.total_primes);
     }
 
     return seastar::make_ready_future<>();
