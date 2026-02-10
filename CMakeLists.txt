@@ -34,3 +34,6 @@ target_link_libraries(prime_calculator Seastar::seastar)
 
 add_executable(prime_bench prime_bench.cpp)
 target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
+
+add_executable(pony_alpha pony_alpha.cpp)
+target_link_libraries(pony_alpha Seastar::seastar)
