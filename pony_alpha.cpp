@@ -5,6 +5,8 @@
 #include <seastar/core/smp.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/core/loop.hh>
+#include <seastar/core/thread.hh>
+#include <seastar/core/sleep.hh>
 
 #include <iostream>
 #include <fstream>
@@ -68,16 +70,32 @@ bool is_prime(uint64_t n) {
     return true;
 }
 
-// 计算区间内的所有素数
+// 计算区间内的所有素数（分批处理，避免阻塞reactor）
 std::vector<uint64_t> compute_primes_in_range(uint64_t start, uint64_t end) {
     std::vector<uint64_t> primes;
     primes.reserve(end - start > 10000 ? 10000 : end - start);
     
-    for (uint64_t n = start; n <= end; ++n) {
-        if (is_prime(n)) {
-            primes.push_back(n);
+    constexpr uint64_t BATCH_SIZE = 1000;  // 每1000个数字检查一次
+    uint64_t current = start;
+    
+    while (current <= end) {
+        uint64_t batch_end = std::min(current + BATCH_SIZE - 1, end);
+        
+        // 处理当前批次
+        for (uint64_t n = current; n <= batch_end; ++n) {
+            if (is_prime(n)) {
+                primes.push_back(n);
+            }
+        }
+        
+        current = batch_end + 1;
+        
+        // 每处理完一个批次就让出控制权（如果在seastar线程中）
+        if (seastar::thread::running_in_thread()) {
+            seastar::thread::yield();
         }
     }
+    
     return primes;
 }
 
@@ -167,7 +185,7 @@ seastar::future<> write_result_to_csv(uint64_t start, uint64_t end,
 
 // ==================== 核心任务处理函数 ====================
 
-// 在单个核心上处理任务（使用 .then() 调用链）
+// 在单个核心上处理任务（使用 seastar::async 避免阻塞 reactor）
 seastar::future<> process_tasks_on_core(unsigned int core_id) {
     return seastar::repeat([core_id] {
         // 步骤1: 从 core 0 的任务队列获取下一个任务
@@ -184,17 +202,18 @@ seastar::future<> process_tasks_on_core(unsigned int core_id) {
             
             Task task = *task_opt;
             
-            // 步骤3: 在当前核心上计算素数（CPU密集型任务）
-            std::vector<uint64_t> primes = compute_primes_in_range(
-                task.start, task.end);
-            
-            // 步骤4: 将结果提交到 core 0 写入文件
-            return seastar::smp::submit_to(0, 
-                [start = task.start, end = task.end, core_id, 
-                 primes = std::move(primes)]() mutable {
-                    return write_result_to_csv(start, end, core_id, 
-                                               std::move(primes));
-                }).then([] {
+            // 步骤3: 在后台线程中计算素数（CPU密集型任务），避免阻塞 reactor
+            return seastar::async([task, core_id] {
+                return compute_primes_in_range(task.start, task.end);
+            }).then([task, core_id](std::vector<uint64_t> primes) {
+                // 步骤4: 将结果提交到 core 0 写入文件
+                return seastar::smp::submit_to(0, 
+                    [start = task.start, end = task.end, core_id, 
+                     primes = std::move(primes)]() mutable {
+                        return write_result_to_csv(start, end, core_id, 
+                                                   std::move(primes));
+                    });
+            }).then([] {
                 // 步骤5: 继续处理下一个任务
                 return seastar::make_ready_future<seastar::stop_iteration>(
                     seastar::stop_iteration::no);
