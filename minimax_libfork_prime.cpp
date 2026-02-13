@@ -7,9 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <queue>
 #include <atomic>
-#include <mutex>
 #include <thread>
 #include <chrono>
 #include <string>
@@ -29,44 +27,36 @@ struct Task {
     uint64_t end;
 };
 
-// 线程安全的任务队列
+// 线程安全的任务队列 - 使用 atomic + futex 优化
 class TaskQueue {
 private:
-    std::queue<Task> queue_;
-    std::mutex mutex_;
     std::atomic<int> next_task_id_{0};
     int total_tasks_;
 
 public:
-    TaskQueue(int total_tasks) : total_tasks_(total_tasks), next_task_id_(0) {}
+    TaskQueue(int total_tasks) : total_tasks_(total_tasks) {}
 
-    // 从队列中获取下一个任务（线程安全）
+    // 从队列中获取下一个任务（无锁实现，使用 atomic）
     std::optional<Task> getNextTask() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        // 使用 fetch_add 原子获取任务ID，无需加锁
+        int task_id = next_task_id_.fetch_add(1, std::memory_order_relaxed);
         
-        if (next_task_id_ >= total_tasks_) {
+        if (task_id >= total_tasks_) {
             return std::nullopt;
         }
         
         Task task;
-        task.task_id = next_task_id_++;
+        task.task_id = task_id;
         // 从2开始（1不是素数）
-        task.start = static_cast<uint64_t>(task.task_id) * g_chunk_size + 2;
-        task.end = static_cast<uint64_t>(task.task_id + 1) * g_chunk_size;
+        task.start = static_cast<uint64_t>(task_id) * g_chunk_size + 2;
+        task.end = static_cast<uint64_t>(task_id + 1) * g_chunk_size;
         
         return task;
     }
 
-    // 检查是否还有任务
-    bool hasTasks() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return next_task_id_ < total_tasks_;
-    }
-
-    // 获取剩余任务数
-    int remainingTasks() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return total_tasks_ - next_task_id_;
+    // 获取剩余任务数（无锁）
+    int remainingTasks() const {
+        return total_tasks_ - next_task_id_.load(std::memory_order_relaxed);
     }
 };
 
@@ -153,12 +143,12 @@ inline constexpr auto processTaskLibfork =
         g_completed_tasks.fetch_add(1);
         g_total_primes.fetch_add(count);
         
-        // 打印进度
+        // 打印进度（在一行动态更新）
         if (g_completed_tasks % 10 == 0 || g_completed_tasks == g_num_tasks) {
             double progress = 100.0 * g_completed_tasks / g_num_tasks;
-            std::cout << "进度: " << std::fixed << std::setprecision(2) 
+            std::cout << "\r进度: " << std::fixed << std::setprecision(1) 
                       << progress << "% (" << g_completed_tasks << "/" << g_num_tasks 
-                      << " 任务, 素数: " << g_total_primes << ")" << std::endl;
+                      << " 任务, 素数: " << g_total_primes << ")" << std::flush;
         }
     }
 };
@@ -174,24 +164,25 @@ void initTaskQueue(int num_tasks, int chunk_size) {
     g_chunk_size = chunk_size;
     g_task_queue = new TaskQueue(num_tasks);
     
-    std::cout << "=== 任务队列初始化完成 ===" << std::endl;
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "       任务队列初始化完成" << std::endl;
+    std::cout << "========================================" << std::endl;
     std::cout << "计算范围: 2 - " << static_cast<uint64_t>(num_tasks) * chunk_size << std::endl;
     std::cout << "区间大小: " << chunk_size << std::endl;
     std::cout << "总任务数: " << num_tasks << std::endl;
     std::cout << "工作线程数: " << g_num_threads << std::endl;
-    std::cout << "==============================" << std::endl;
+    std::cout << "========================================\n" << std::endl;
 }
 
 // 输出计算结果到CSV文件
 void outputResults(const std::string& filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error: 无法打开输出文件 " << filename << std::endl;
+        std::cerr << "错误: 无法打开输出文件 " << filename << std::endl;
         return;
     }
     
-    std::cout << "\n=== 开始写入结果文件 ===" << std::endl;
-    std::cout << "输出文件: " << filename << std::endl;
+    std::cout << "\n正在写入结果文件: " << filename << std::endl;
     
     // 按任务ID排序输出
     std::sort(g_results.begin(), g_results.end(), 
@@ -212,10 +203,27 @@ void outputResults(const std::string& filename) {
     }
     
     file.close();
+    std::cout << "结果已写入: " << filename << std::endl;
+}
+
+// 打印统计结果
+void printStatistics(long duration_ms) {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "         计算结果统计" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "已完成任务: " << g_completed_tasks.load() << "/" << g_num_tasks << std::endl;
+    std::cout << "素数总数:   " << g_total_primes.load() << std::endl;
+    std::cout << "计算耗时:   " << duration_ms << " ms" << std::endl;
     
-    std::cout << "=== 计算完成 ===" << std::endl;
-    std::cout << "已完成任务: " << g_completed_tasks << "/" << g_num_tasks << std::endl;
-    std::cout << "素数总数: " << g_total_primes << std::endl;
+    uint64_t total_numbers = static_cast<uint64_t>(g_num_tasks) * g_chunk_size;
+    double prime_density = 100.0 * g_total_primes.load() / total_numbers;
+    
+    std::cout << "素数密度:   " << std::fixed << std::setprecision(4) << prime_density << "%" << std::endl;
+    std::cout << "计算速度:   " << std::fixed << std::setprecision(0) 
+              << static_cast<double>(total_numbers) / duration_ms << " 数/毫秒" << std::endl;
+    std::cout << "素数发现率: " << std::fixed << std::setprecision(2) 
+              << static_cast<double>(g_total_primes.load()) / duration_ms << " 素数/毫秒" << std::endl;
+    std::cout << "========================================" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -270,7 +278,8 @@ int main(int argc, char** argv) {
     // 创建 libfork 线程池
     lf::lazy_pool pool(static_cast<size_t>(num_threads));
     
-    std::cout << "\n=== 开始计算 ===" << std::endl;
+    std::cout << "开始并行计算...\n" << std::endl;
+    std::cout << std::flush;
     
     // 启动工作线程
     std::vector<std::thread> threads;
@@ -285,6 +294,8 @@ int main(int argc, char** argv) {
         t.join();
     }
     
+    std::cout << std::endl;  // 结束进度条行
+    
     // 记录结束时间
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -294,7 +305,8 @@ int main(int argc, char** argv) {
                                std::to_string(chunk_size) + ".csv";
     outputResults(output_file);
     
-    std::cout << "总耗时: " << duration.count() << "ms" << std::endl;
+    // 打印统计结果
+    printStatistics(duration.count());
     
     // 清理
     delete g_task_queue;

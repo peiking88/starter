@@ -20,7 +20,7 @@
 #include <chrono>
 
 namespace ss = seastar;
-static ss::logger app_log("pony_alpha");
+static ss::logger app_log("glm5_seastar");
 
 // 配置常量（可通过命令行参数覆盖）
 uint64_t MAX_NUM = 2000000ULL;                   // 默认计算到200万
@@ -115,34 +115,55 @@ void init_task_queue(uint64_t max_num, uint64_t chunk_size) {
         state.task_queue.pop();
     }
 
-    // 生成所有任务区间
-    for (uint64_t start = 2; start <= max_num; start += chunk_size) {
-        uint64_t end = std::min(start + chunk_size - 1, max_num);
+    // 生成所有任务区间（与其他版本保持一致）
+    // 任务数 = max_num / chunk_size
+    uint64_t num_tasks = max_num / chunk_size;
+    for (uint64_t task_id = 0; task_id < num_tasks; ++task_id) {
+        uint64_t start = task_id * chunk_size + 2;
+        uint64_t end = (task_id + 1) * chunk_size;
         state.task_queue.push({start, end});
     }
 
     state.total_tasks = state.task_queue.size();
     state.completed_tasks = 0;
 
-    app_log.info("=== 任务队列初始化完成 ===");
-    app_log.info("计算范围: 2 - {}", max_num);
-    app_log.info("区间大小: {}", chunk_size);
-    app_log.info("总任务数: {}", state.total_tasks);
-    app_log.info("CPU核心数: {}", seastar::smp::count);
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "       任务队列初始化完成" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "计算范围: 2 - " << max_num << std::endl;
+    std::cout << "区间大小: " << chunk_size << std::endl;
+    std::cout << "总任务数: " << state.total_tasks << std::endl;
+    std::cout << "CPU核心数: " << seastar::smp::count << std::endl;
+    std::cout << "========================================\n" << std::endl;
 }
 
 // ==================== 输出计算结果函数 ====================
 
-void close_output_file() {
+void close_output_file(uint64_t max_num, long duration_ms) {
     auto& state = GlobalState::instance();
 
     if (state.output_file.is_open()) {
         state.output_file.close();
     }
 
-    app_log.info("=== 计算完成 ===");
-    app_log.info("已完成任务: {}/{}", state.completed_tasks, state.total_tasks);
-    app_log.info("素数总数: {}", state.total_primes);
+    std::cout << "\n正在写入结果文件: primes.csv" << std::endl;
+    std::cout << "结果已写入: primes.csv" << std::endl;
+
+    // 计算统计信息
+    double prime_density = 100.0 * state.total_primes / max_num;
+    
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "         计算结果统计" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "已完成任务: " << state.completed_tasks << "/" << state.total_tasks << std::endl;
+    std::cout << "素数总数:   " << state.total_primes << std::endl;
+    std::cout << "计算耗时:   " << duration_ms << " ms" << std::endl;
+    std::cout << "素数密度:   " << std::fixed << std::setprecision(4) << prime_density << "%" << std::endl;
+    std::cout << "计算速度:   " << std::fixed << std::setprecision(0) 
+              << static_cast<double>(max_num) / duration_ms << " 数/毫秒" << std::endl;
+    std::cout << "素数发现率: " << std::fixed << std::setprecision(2) 
+              << static_cast<double>(state.total_primes) / duration_ms << " 素数/毫秒" << std::endl;
+    std::cout << "========================================" << std::endl;
 }
 
 // ==================== 任务管理函数 ====================
@@ -178,12 +199,13 @@ seastar::future<> write_result_to_csv(uint64_t start, uint64_t end,
     state.completed_tasks++;
     state.total_primes += primes.size();
 
-    // 每100个任务或完成时显示进度
+    // 每100个任务或完成时显示进度（在一行动态更新）
     if (state.completed_tasks % 100 == 0 ||
         state.completed_tasks == state.total_tasks) {
         double progress = 100.0 * state.completed_tasks / state.total_tasks;
-        app_log.info("进度: {:.2f}% ({}/{} 任务, 素数: {})", 
-                     progress, state.completed_tasks, state.total_tasks, state.total_primes);
+        std::cout << "\r进度: " << std::fixed << std::setprecision(1)
+                  << progress << "% (" << state.completed_tasks << "/" << state.total_tasks 
+                  << " 任务, 素数: " << state.total_primes << ")" << std::flush;
     }
 
     return seastar::make_ready_future<>();
@@ -298,8 +320,7 @@ int main(int argc, char** argv) {
                 app_log.error("无法打开输出文件 {}", output_file);
                 return seastar::make_ready_future<>();
             }
-            app_log.info("=== 开始写入结果文件 ===");
-            app_log.info("输出文件: {}", output_file);
+            std::cout << "开始并行计算...\n" << std::endl;
 
             return seastar::make_ready_future<>();
             
@@ -318,14 +339,13 @@ int main(int argc, char** argv) {
             // 4. 等待所有核心完成任务
             return seastar::when_all(futures.begin(), futures.end()).discard_result();
             
-        }).then([start_time] {
+        }).then([start_time, max_num] {
             // 5. 关闭输出文件并显示完成信息
-            return seastar::smp::submit_to(0, [start_time] {
+            return seastar::smp::submit_to(0, [start_time, max_num] {
                 auto end_time = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-                close_output_file();
-                app_log.info("总耗时: {}ms", duration.count());
+                close_output_file(max_num, duration.count());
             });
         });
     });

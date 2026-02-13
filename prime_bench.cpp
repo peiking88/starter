@@ -1,476 +1,291 @@
-// Standard library headers
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
+// prime_bench: 素数计算性能基准测试
+// 依次调用外部程序：sequence、minimax_libfork、glm5_libfork、glm5_seastar、minimax_seastar
+
 #include <iostream>
-#include <mutex>
-#include <queue>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <numeric>
+#include <chrono>
 #include <iomanip>
-#include <latch>
+#include <algorithm>
+#include <cstdlib>
+#include <getopt.h>
 
-// Third-party library headers
-#include <libfork/core.hpp>
-#include <libfork/schedule.hpp>
-
-#include <seastar/core/app-template.hh>
-#include <seastar/core/map_reduce.hh>
-#include <seastar/core/smp.hh>
-#include <seastar/core/thread.hh>
-#include <seastar/core/when_all.hh>
-#include <seastar/util/backtrace.hh>
-#include <seastar/util/log.hh>
-
-namespace ss = seastar;
-namespace lf = ::lf;
-static ss::logger app_log("prime_bench");
-
-// 全局任务计数器（线程安全）
-std::atomic<int> next_task_id{0};
-int total_tasks = 200;               // 总任务数（通过命令行参数设置）
-int numbers_per_task = 100000;       // 每个任务处理的数字数量（通过命令行参数设置）
-
-// 线程安全的任务获取函数
-int get_next_task() {
-    return next_task_id.fetch_add(1);
-}
-
-// 顺序计算质数（简单版，仅计数）
-inline size_t count_primes_in_range(int start, int end) {
-    if (start > end) return 0;
-    if (start < 2) start = 2;
-
-    size_t count = 0;
-
-    if (start <= 2 && end >= 2) {
-        count++;
-    }
-
-    int actual_start = (start % 2 == 0) ? start + 1 : start;
-    if (actual_start < 3) actual_start = 3;
-
-    for (int i = actual_start; i <= end; i += 2) {
-        bool is_prime = true;
-        int limit = static_cast<int>(std::sqrt(static_cast<double>(i)));
-
-        for (int j = 3; j <= limit; j += 2) {
-            if (i % j == 0) {
-                is_prime = false;
-                break;
-            }
-        }
-        if (is_prime) count++;
-    }
-            
-    return count;
-}
-
-// libfork 并行计算 - 使用 fork-join 模式处理任务
-inline constexpr auto parallel_prime_count_libfork =
-    [](auto self, int start_task, int end_task, int chunk_size) -> lf::task<size_t> {
-    int num_tasks = end_task - start_task;
-    
-    if (num_tasks == 0) {
-        co_return 0;
-    }
-    
-    if (num_tasks == 1) {
-        // 只有一个任务，直接计算
-        int start = start_task * chunk_size + 1;
-        int end = (start_task + 1) * chunk_size;
-        co_return count_primes_in_range(start, end);
-    }
-    
-    // 多个任务，分割为两部分
-    int mid = start_task + num_tasks / 2;
-    
-    size_t left_count = 0;
-    size_t right_count = 0;
-    
-    // 并行执行左右两部分
-    co_await lf::fork[&left_count, self](start_task, mid, chunk_size);
-    co_await lf::call[&right_count, self](mid, end_task, chunk_size);
-    
-    co_await lf::join;
-    
-    co_return left_count + right_count;
+// ============================================================================
+// 配置
+// ============================================================================
+struct Config {
+    int num_tasks = 4;       // 任务总数
+    int chunk_size = 100000;   // 每个任务的区间大小
+    int num_threads = 4;      // 使用线程数
 };
 
+Config g_config;
 
+// ============================================================================
+// 结果结构
+// ============================================================================
+struct BenchmarkResult {
+    std::string name;
+    size_t primes;
+    long duration_ms;
+};
 
-// 顺序计算质数（与test_sequential相同的功能）
-ss::future<std::pair<size_t, long>> sequential_prime_count(int max_number) {
-    return ss::async([max_number] {
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
-        size_t primes_count = count_primes_in_range(2, max_number);
-        
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        
-        app_log.info("=== 顺序计算结果 ===");
-        app_log.info("质数总数: {}", primes_count);
-        app_log.info("计算耗时: {}ms", duration.count());
-        
-        return std::make_pair(primes_count, duration.count());
-    });
-}
-
-// 真正的工作窃取模式：每个shard独立处理任务，避免在shard 0上集中创建任务
-ss::future<size_t> count_primes_on_shard(int shard_id) {
-    return ss::async([shard_id] {
-        size_t total_primes = 0;
-        size_t tasks_completed = 0;
-
-        // app_log.info("Shard {:2} 开始工作窃取", shard_id);
-
-        // 真正的工作窃取：每个shard独立获取任务
-        while (true) {
-            int task_id = get_next_task();
-
-            // 如果所有任务都已分配，停止
-            if (task_id >= total_tasks) {
+// ============================================================================
+// 运行外部程序并解析结果
+// ============================================================================
+BenchmarkResult runProgram(const std::string& program, const std::string& args) {
+    BenchmarkResult result;
+    result.name = program;
+    
+    // 构建命令
+    std::string cmd = "./" + program + " " + args + " 2>/dev/null";
+    
+    // 记录开始时间
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    // 运行程序
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        std::cerr << "Error: 无法运行 " << program << std::endl;
+        result.primes = result.duration_ms = 0;
+        -1;
+        return result;
+    }
+    
+    // 读取输出
+    char buffer[128];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+    
+    // 关闭管道
+    pclose(pipe);
+    
+    // 记录结束时间
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    // 解析素数总数（从输出中提取）
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (line.find("素数总数:") != std::string::npos) {
+            size_t pos = line.find(":");
+            if (pos != std::string::npos) {
+                std::string num_str = line.substr(pos + 1);
+                // 去除空格
+                num_str.erase(std::remove_if(num_str.begin(), num_str.end(), ::isspace), num_str.end());
+                result.primes = std::stoull(num_str);
                 break;
             }
-
-            tasks_completed++;
-
-            // 计算任务区间
-            int start = task_id * numbers_per_task + 1;
-            int end = (task_id + 1) * numbers_per_task;
-
-            // 根据任务区间调整计算粒度（大数区间素数密度低，计算更快）
-            int batch_size = 1000;
-            if (start > 10000000) {
-                // 大数区间素数密度低，可以加大批次
-                batch_size = 2000;
-            }
-
-            // 分批处理，避免长时间阻塞Reactor
-            size_t batch_primes = 0;
-            for (int batch_start = start; batch_start <= end;
-                 batch_start += batch_size) {
-                int batch_end = std::min(batch_start + batch_size - 1, end);
-                batch_primes += count_primes_in_range(batch_start, batch_end);
-
-                // 每处理完一个批次就让出控制权
-                ss::thread::yield();
-            }
-
-            total_primes += batch_primes;
-
-            //每完成5个任务输出一次进度
-            // if (tasks_completed % 5 == 0) {
-            //     app_log.info(
-            //       "Shard {:2} 已完成 {:3} 个任务，当前累计素数: {:8}",
-            //       shard_id,
-            //       tasks_completed,
-            //       total_primes);
-            // }
         }
-
-        return total_primes;
-    });
+    }
+    
+    return result;
 }
 
-// 基于工作窃取模式的并行素数统计
-ss::future<> async_task(int total_tasks_param, int numbers_per_task_param) {
-    // 设置总任务数
-    total_tasks = total_tasks_param;
-    // 设置每个任务处理的数字数量
-    numbers_per_task = numbers_per_task_param;
-
-    // 记录程序开始时间
-    auto program_start = std::chrono::high_resolution_clock::now();
-
-    app_log.info("=== 工作窃取模式启动 ===");
-    app_log.info("总任务数: {}, 每个任务处理数字数: {}", total_tasks, numbers_per_task);
-    app_log.info("总计算范围: [1, {}]", total_tasks * numbers_per_task);
-    app_log.info("可用shard数量: {}", ss::smp::count);
-
-    // 重置任务计数器
-    next_task_id.store(0);
-
-    // 包含所有shard（包括shard 0）
-    std::vector<int> shards(ss::smp::count);
-    std::iota(shards.begin(), shards.end(), 0);
-
-    return ss::map_reduce(
-             shards,
-             // mapper函数 - 在每个shard上执行工作窃取
-             [](int shard_id) {
-                 // 将任务提交到目标shard执行，避免在shard 0上集中处理
-                 return ss::smp::submit_to(shard_id, [shard_id] {
-                     return count_primes_on_shard(shard_id);
-                 });
-             },
-             // reduce函数 - 累加所有shard的素数个数
-             size_t(0),
-             [](size_t total, size_t count) { return total + count; })
-      .then([program_start](size_t total_primes) {
-          // 计算程序总耗时
-          auto program_end = std::chrono::high_resolution_clock::now();
-          auto program_duration
-            = std::chrono::duration_cast<std::chrono::milliseconds>(
-              program_end - program_start);
-
-          // 计算素数密度
-          double prime_density = static_cast<double>(total_primes)
-                                 / (total_tasks * numbers_per_task) * 100;
-
-          app_log.info("");
-          app_log.info("=== 工作窃取模式统计结果 ===");
-          app_log.info("总计算范围: [1, {}]", total_tasks * numbers_per_task);
-          app_log.info("总任务数: {}", total_tasks);
-          app_log.info("总共找到素数: {}", total_primes);
-          app_log.info("素数密度: {:.6f}%", prime_density);
-          app_log.info("程序总耗时: {}ms", program_duration.count());
-          app_log.info("计算性能: {:.2f} 个数字/毫秒",
-            static_cast<double>(total_tasks * numbers_per_task) / program_duration.count());
-          app_log.info("素数发现率: {:.2f} 个素数/毫秒",
-            static_cast<double>(total_primes) / program_duration.count());
-
-          return ss::make_ready_future<>();
-      });
+// ============================================================================
+// 打印分隔线
+// ============================================================================
+void printSeparator(char c = '=', int width = 60) {
+    std::cout << std::string(width, c) << std::endl;
 }
 
-
-
-// 执行 libfork 版本计算
-size_t run_libfork_version(int num_tasks, int chunk_size, int num_threads) {
-    lf::lazy_pool pool(static_cast<std::size_t>(num_threads));
-    size_t primes = lf::sync_wait(pool, parallel_prime_count_libfork, 0, num_tasks, chunk_size);
-    return primes;
-}
-
-// 执行顺序版本计算
-size_t run_sequential_version(int max_number) {
-    return count_primes_in_range(2, max_number);
-}
-
-// 执行三种版本的性能测试：Seastar、libfork、Sequential
-ss::future<> compare_all_implementations(int num_tasks, int chunk_size) {
-    int max_number = num_tasks * chunk_size;
-    int num_threads = static_cast<int>(std::thread::hardware_concurrency());
+// ============================================================================
+// 打印结果表格
+// ============================================================================
+void printResults(const std::vector<BenchmarkResult>& results) {
+    printSeparator();
+    std::cout << "性能比较结果" << std::endl;
+    printSeparator();
     
-    app_log.info("=== 综合性能比较测试 ===");
-    app_log.info("计算范围: [1, {}]", max_number);
-    app_log.info("任务数: {}", num_tasks);
-    app_log.info("区间大小: {}", chunk_size);
-    app_log.info("工作线程数: {}", num_threads);
-    app_log.info("");
+    // 表头（使用固定宽度格式）
+    printf("%-24s %18s %12s\n", "框架", "素数总数", "耗时(ms)");
+    printSeparator('-');
     
-    // 存储三种实现的结果和耗时
-    struct Result {
-        size_t primes;
-        long duration_ms;
-        std::string name;
-    };
+    // 数据行
+    for (const auto& r : results) {
+        printf("%-24s %18lu %12ld\n", r.name.c_str(), r.primes, r.duration_ms);
+    }
+    printSeparator('-');
     
-    std::vector<Result> results;
-    
-    // 1. Seastar 版本
-    app_log.info("开始 Seastar 并行计算...");
-    auto seastar_start = std::chrono::high_resolution_clock::now();
-    
-    total_tasks = num_tasks;
-    numbers_per_task = chunk_size;
-    next_task_id.store(0);
-    
-    std::vector<int> shards(ss::smp::count);
-    std::iota(shards.begin(), shards.end(), 0);
-    
-    size_t seastar_primes = 0;
-    auto f = ss::map_reduce(
-        shards,
-        [](int shard_id) {
-            return ss::smp::submit_to(shard_id, [shard_id] {
-                return count_primes_on_shard(shard_id);
-            });
-        },
-        size_t(0),
-        [](size_t total, size_t count) { return total + count; })
-    .then([&seastar_primes](size_t result) {
-        seastar_primes = result;
-    });
-    
-    f.wait();
-    
-    auto seastar_end = std::chrono::high_resolution_clock::now();
-    auto seastar_duration = std::chrono::duration_cast<std::chrono::milliseconds>(seastar_end - seastar_start);
-    
-    results.push_back({seastar_primes, seastar_duration.count(), "Seastar"});
-    
-    app_log.info("=== Seastar 计算结果 ===");
-    app_log.info("质数总数: {}", seastar_primes);
-    app_log.info("计算耗时: {}ms", seastar_duration.count());
-    app_log.info("");
-    
-    // 2. libfork 版本
-    app_log.info("开始 libfork 并行计算...");
-    auto libfork_start = std::chrono::high_resolution_clock::now();
-    
-    lf::lazy_pool pool(static_cast<std::size_t>(num_threads));
-    size_t libfork_primes = lf::sync_wait(pool, parallel_prime_count_libfork, 0, num_tasks, chunk_size);
-    
-    auto libfork_end = std::chrono::high_resolution_clock::now();
-    auto libfork_duration = std::chrono::duration_cast<std::chrono::milliseconds>(libfork_end - libfork_start);
-    
-    results.push_back({libfork_primes, libfork_duration.count(), "libfork"});
-    
-    app_log.info("=== libfork 计算结果 ===");
-    app_log.info("质数总数: {}", libfork_primes);
-    app_log.info("计算耗时: {}ms", libfork_duration.count());
-    app_log.info("");
-    
-    // 3. 顺序版本
-    app_log.info("开始顺序计算...");
-    auto sequential_start = std::chrono::high_resolution_clock::now();
-    size_t sequential_primes = count_primes_in_range(2, max_number);
-    auto sequential_end = std::chrono::high_resolution_clock::now();
-    auto sequential_duration = std::chrono::duration_cast<std::chrono::milliseconds>(sequential_end - sequential_start);
-    
-    results.push_back({sequential_primes, sequential_duration.count(), "Sequential"});
-    
-    app_log.info("=== 顺序计算结果 ===");
-    app_log.info("质数总数: {}", sequential_primes);
-    app_log.info("计算耗时: {}ms", sequential_duration.count());
-    app_log.info("");
-    
-    // 结果比较和总结
-    app_log.info("=== 性能比较总结 ===");
-    app_log.info("计算范围: [1, {}]", max_number);
-    app_log.info("任务数: {}, 区间大小: {}", num_tasks, chunk_size);
-    app_log.info("");
-    
-    // 检查一致性
+    // 结果一致性检查
     bool all_consistent = true;
-    for (size_t i = 1; i < results.size(); i++) {
-        if (results[i].primes != results[0].primes) {
+    size_t expected_primes = results[0].primes;
+    for (size_t i = 1; i < results.size(); ++i) {
+        if (results[i].primes != expected_primes) {
             all_consistent = false;
             break;
         }
     }
-    app_log.info("结果一致性: {}", all_consistent ? "通过" : "失败");
-    for (const auto& result : results) {
-        app_log.info("{}: {}", result.name, result.primes);
-    }
-    app_log.info("");
     
-    // 性能对比
-    for (const auto& result : results) {
-        app_log.info("{}: {}ms", result.name, result.duration_ms);
-    }
-    app_log.info("");
+    std::cout << "结果一致性: " << (all_consistent ? "✓ 通过" : "✗ 失败") << std::endl;
+    printSeparator();
     
-    // 计算加速比
-    if (results[2].duration_ms > 0) {  // 以顺序版本为基准
-        for (size_t i = 0; i < 2; i++) {
-            double speedup = static_cast<double>(results[2].duration_ms) / results[i].duration_ms;
-            app_log.info("{} 加速比: {:.2f}x", results[i].name, speedup);
-            
-            if (speedup > 1.0) {
-                app_log.info("{} 比顺序计算快 {:.2f} 倍", results[i].name, speedup);
-            } else if (speedup < 1.0) {
-                app_log.info("{} 比顺序计算慢 {:.2f} 倍", results[i].name, 1.0 / speedup);
+    // 加速比（以顺序版本为基准）
+    // 找到顺序版本的结果
+    const BenchmarkResult* seq_result = nullptr;
+    for (const auto& r : results) {
+        if (r.name == "sequence") {
+            seq_result = &r;
+            break;
+        }
+    }
+    
+    if (seq_result && seq_result->duration_ms > 0) {
+        std::cout << "\n加速比（以sequence为基准）:" << std::endl;
+        for (const auto& r : results) {
+            if (r.name != "sequence" && r.duration_ms > 0) {
+                double speedup = static_cast<double>(seq_result->duration_ms) / r.duration_ms;
+                std::cout << "  " << std::left << std::setw(20) << r.name 
+                          << ": " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
             }
         }
     }
     
-    // 并行版本之间的对比
-    const double SIGNIFICANT_THRESHOLD = 0.05; // 5%的差异阈值
-    
-    // Seastar vs libfork
-    if (results[0].duration_ms > 0 && results[1].duration_ms > 0) {
-        double diff = ((results[0].duration_ms - results[1].duration_ms) / results[1].duration_ms) * 100;
-        
-        if (std::abs(diff) > SIGNIFICANT_THRESHOLD * 100) {
-            if (diff > 0) {
-                app_log.info("libfork 比 Seastar 快 {:.2f}%", diff);
-            } else {
-                app_log.info("Seastar 比 libfork 快 {:.2f}%", -diff);
-            }
-        } else {
-            app_log.info("Seastar 和 libfork 性能相当");
+    // 最快框架
+    if (results.size() > 0) {
+        auto fastest = std::min_element(results.begin(), results.end(),
+            [](const BenchmarkResult& a, const BenchmarkResult& b) {
+                return a.duration_ms > 0 && b.duration_ms > 0 && a.duration_ms < b.duration_ms;
+            });
+        if (fastest != results.end() && fastest->duration_ms > 0) {
+            std::cout << "\n最快框架: " << fastest->name 
+                      << " (" << fastest->duration_ms << "ms)" << std::endl;
         }
     }
     
-    // 找出最快的并行框架
-    if (results.size() >= 2) {
-        auto fastest = std::min_element(results.begin(), results.begin() + 2, 
-            [](const Result& a, const Result& b) { return a.duration_ms < b.duration_ms; });
-        
-        app_log.info("最快的并行框架: {} ({}ms)", fastest->name, fastest->duration_ms);
-        
-        // 计算相对于顺序版本的性能提升
-        if (results[2].duration_ms > 0) {
-            double speedup = static_cast<double>(results[2].duration_ms) / fastest->duration_ms;
-            app_log.info("并行框架整体比顺序计算快 {:.2f} 倍", speedup);
-        }
-    }
-    
-    return ss::make_ready_future<>();
+    printSeparator();
 }
 
+// ============================================================================
+// 主函数
+// ============================================================================
 int main(int argc, char** argv) {
-    // 使用 seastar 的 app_template 来解析部分参数，但使用自己的方式处理 -t 和 -n
-    // 因为 seastar 的 app_template 和 libfork 参数有冲突
-    
-    if (argc < 2) {
-        std::cout << "用法: " << argv[0] << " -t <任务数> -n <区间大小> [seastar 参数]\n";
-        std::cout << "\n参数说明:\n";
-        std::cout << "  -t, --tasks <N>         任务数 (默认: 4)\n";
-        std::cout << "  -n, --chunk-size <N>    区间大小 (默认: 5000000)\n";
-        std::cout << "\n说明: 程序将测试 Seastar、libfork 和 Sequential 三种实现\n";
-        std::cout << "\n并行框架说明:\n";
-        std::cout << "  Seastar: 事件驱动框架，基于共享内存架构\n";
-        std::cout << "  libfork: C++23协程框架，支持fork-join并行模式\n";
-        std::cout << "  Sequential: 顺序计算，作为性能基准\n";
-        std::cout << "\n示例:\n";
-        std::cout << "  " << argv[0] << " -t 8 -n 2500000\n";
-        std::cout << "  " << argv[0] << " -t 4 -n 5000000 -c4 -m1G  (4个core, 1G内存限制)\n";
-        return 1;
-    }
-    
-    // 手动解析 -t 和 -n 参数
+    // 默认参数
     int num_tasks = 4;
-    int chunk_size = 5000000;
+    int chunk_size = 100000;
+    int num_threads = 4;
     
-    // 创建新参数列表，去掉 -t 和 -n 供 seastar 使用
-    std::vector<char*> seastar_args;
-    seastar_args.push_back(argv[0]);
-    
-    for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
-        if ((arg == "-t" || arg == "--tasks") && i + 1 < argc) {
-            num_tasks = std::atoi(argv[++i]);
-        } else if ((arg == "-n" || arg == "--chunk-size") && i + 1 < argc) {
-            chunk_size = std::atoi(argv[++i]);
-        } else {
-            seastar_args.push_back(argv[i]);
+    // 解析命令行参数
+    int opt;
+    while ((opt = getopt(argc, argv, "t:n:c:h")) != -1) {
+        switch (opt) {
+            case 't':
+                num_tasks = std::atoi(optarg);
+                break;
+            case 'n':
+                chunk_size = std::atoi(optarg);
+                break;
+            case 'c':
+                num_threads = std::atoi(optarg);
+                break;
+            case 'h':
+            default:
+                std::cout << "用法: " << argv[0] << " [-t 任务数] [-n 区间大小] [-c 线程数]\n" << std::endl;
+                std::cout << "参数说明:" << std::endl;
+                std::cout << "  -t <N>   任务总数 (默认: 4)" << std::endl;
+                std::cout << "  -n <N>   区间大小，每任务计算的数字范围 (默认: 100000)" << std::endl;
+                std::cout << "  -c <N>   线程数 (默认: 4)" << std::endl;
+                std::cout << "\n示例:" << std::endl;
+                std::cout << "  " << argv[0] << " -t 10 -n 100000 -c 8" << std::endl;
+                std::cout << "  " << argv[0] << " -t 20 -n 100000 -c 16" << std::endl;
+                return (opt == 'h') ? 0 : 1;
         }
     }
     
+    // 参数校验
     if (num_tasks <= 0) num_tasks = 4;
-    if (chunk_size <= 0) chunk_size = 5000000;
+    if (chunk_size <= 0) chunk_size = 100000;
+    if (num_threads <= 0) num_threads = 4;
     
-    // 将 seastar 参数转换回 char**
-    std::vector<char*> seastar_argv = seastar_args;
-    int seastar_argc = seastar_argv.size();
+    // 构建参数字符串
+    std::ostringstream args;
+    args << "-t " << num_tasks << " -n " << chunk_size << " -c " << num_threads;
+    std::string args_str = args.str();
     
-    // 运行 seastar 应用
-    return seastar::app_template().run(seastar_argc, seastar_argv.data(), [num_tasks, chunk_size]() -> ss::future<int> {
-        return ss::async([num_tasks, chunk_size] {
-            // 比较三种实现的性能
-            auto f = compare_all_implementations(num_tasks, chunk_size);
-            f.wait();
-            return 0;  // 成功返回
-        }).handle_exception([](std::exception_ptr eptr) {
-            app_log.error("异常: {}", seastar::current_backtrace());
-            return 1;  // 错误返回
-        });
-    });
+    // 打印配置信息
+    printSeparator();
+    std::cout << "素数计算性能基准测试" << std::endl;
+    printSeparator();
+    std::cout << "计算范围: 2 - " << static_cast<uint64_t>(num_tasks) * chunk_size << std::endl;
+    std::cout << "任务数:   " << num_tasks << std::endl;
+    std::cout << "区间大小: " << chunk_size << std::endl;
+    std::cout << "线程数:   " << num_threads << std::endl;
+    printSeparator();
+    
+    // 存储结果
+    std::vector<BenchmarkResult> results;
+    
+    // 1. 运行 sequence 版本
+    std::cout << "\n[1/5] 运行 sequence (顺序计算)..." << std::endl;
+    results.push_back(runProgram("sequence_prime", args_str));
+    
+    // 2. 运行 minimax_libfork 版本
+    std::cout << "[2/5] 运行 minimax_libfork (libfork工作窃取)..." << std::endl;
+    results.push_back(runProgram("minimax_libfork_prime", args_str));
+    
+    // 3. 运行 glm5_libfork 版本
+    std::cout << "[3/5] 运行 glm5_libfork (libfork fork-join)..." << std::endl;
+    results.push_back(runProgram("glm5_libfork_prime", args_str));
+    
+    // 4. 运行 glm5_seastar 版本
+    std::cout << "[4/5] 运行 glm5_seastar (Seastar框架)..." << std::endl;
+    // Seastar 版本使用 -t 和 -n 参数，-c 是给 seastar 用的
+    // 添加 --logger-ostream-type none 关闭 Seastar 日志
+    std::ostringstream seastar_args;
+    seastar_args << "-t " << num_tasks << " -n " << chunk_size << " -c" << num_threads 
+                 << " --logger-ostream-type none";
+    results.push_back(runProgram("glm5_seastar_prime", seastar_args.str()));
+    
+    // 5. 运行 minimax_seastar 版本
+    std::cout << "[5/5] 运行 minimax_seastar (Seastar工作窃取)..." << std::endl;
+    // minimax_seastar_prime 使用环境变量，需要构建环境变量参数
+    std::ostringstream minimax_seastar_args;
+    minimax_seastar_args << "--logger-ostream-type none";
+    std::string minimax_seastar_env = "NUM_TASKS=" + std::to_string(num_tasks) + 
+                                       " CHUNK_SIZE=" + std::to_string(chunk_size) + 
+                                       " NUM_CORES=" + std::to_string(num_threads);
+    std::string minimax_seastar_cmd = minimax_seastar_env + " ./minimax_seastar_prime " + minimax_seastar_args.str();
+    
+    BenchmarkResult minimax_seastar_result;
+    minimax_seastar_result.name = "minimax_seastar";
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    FILE* pipe = popen(minimax_seastar_cmd.c_str(), "r");
+    if (pipe) {
+        char buffer[128];
+        std::string output;
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+        pclose(pipe);
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        minimax_seastar_result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        
+        // 解析素数总数
+        std::istringstream iss(output);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (line.find("素数总数:") != std::string::npos) {
+                size_t pos = line.find(":");
+                if (pos != std::string::npos) {
+                    std::string num_str = line.substr(pos + 1);
+                    num_str.erase(std::remove_if(num_str.begin(), num_str.end(), ::isspace), num_str.end());
+                    minimax_seastar_result.primes = std::stoull(num_str);
+                    break;
+                }
+            }
+        }
+    }
+    results.push_back(minimax_seastar_result);
+    
+    // 打印结果
+    printResults(results);
+    
+    return 0;
 }

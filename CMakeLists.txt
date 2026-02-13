@@ -26,20 +26,25 @@ add_subdirectory(3rdparty/seastar)
 add_subdirectory(3rdparty/libfork)
 
 # ========== 自定义目标 ==========
+
+# Seastar程序
 add_executable(big_file_splitter big_file_splitter.cpp)
 target_link_libraries(big_file_splitter Seastar::seastar)
 
-add_executable(prime_calculator prime_calculator.cpp)
-target_link_libraries(prime_calculator Seastar::seastar)
+add_executable(glm5_seastar_prime glm5_seastar_prime.cpp)
+target_link_libraries(glm5_seastar_prime Seastar::seastar)
 
+add_executable(minimax_seastar_prime minimax_seastar_prime.cpp)
+target_link_libraries(minimax_seastar_prime Seastar::seastar)
+
+# libfork程序
+add_executable(glm5_libfork_prime glm5_libfork_prime.cpp)
+target_link_libraries(glm5_libfork_prime libfork::libfork)
+
+add_executable(minimax_libfork_prime minimax_libfork_prime.cpp)
+target_link_libraries(minimax_libfork_prime libfork::libfork)
+
+# 其他程序
 add_executable(prime_bench prime_bench.cpp)
-target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
 
-add_executable(pony_alpha pony_alpha.cpp)
-target_link_libraries(pony_alpha Seastar::seastar)
-
-add_executable(minimax_prime minimax_prime.cpp)
-target_link_libraries(minimax_prime libfork::libfork)
-
-add_executable(glm5_prime glm5_prime.cpp)
-target_link_libraries(glm5_prime libfork::libfork)
+add_executable(sequence_prime sequence_prime.cpp)
