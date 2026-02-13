@@ -40,3 +40,6 @@ target_link_libraries(pony_alpha Seastar::seastar)
 
 add_executable(minimax_prime minimax_prime.cpp)
 target_link_libraries(minimax_prime libfork::libfork)
+
+add_executable(glm5_prime glm5_prime.cpp)
+target_link_libraries(glm5_prime libfork::libfork)
