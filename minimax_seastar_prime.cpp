@@ -8,7 +8,12 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/core/when_all.hh>
+#include <seastar/core/file.hh>
+#include <seastar/core/seastar.hh>
+#include <seastar/core/thread.hh>
+#include <seastar/core/loop.hh>
 #include <seastar/util/log.hh>
+#include <boost/program_options.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -18,6 +23,8 @@
 #include <iomanip>
 #include <cmath>
 #include <cstdlib>
+
+namespace po = boost::program_options;
 
 // Seastar日志器
 static seastar::logger applog("minimax_prime");
@@ -81,69 +88,54 @@ std::vector<uint64_t> computePrimesInRange(uint64_t start, uint64_t end) {
     return primes;
 }
 
-// 在指定CPU核心上处理单个任务
-// 使用.then()链返回结果
-seastar::future<TaskResult> processTaskOnCore(int core_id) {
-    // 从全局队列获取下一个任务（工作窃取）
-    int task_id = g_next_task_id.fetch_add(1, std::memory_order_relaxed);
-    
-    if (task_id >= g_total_tasks) {
-        // 没有更多任务
-        return seastar::make_ready_future<TaskResult>(TaskResult{-1, 0, 0, core_id, {}});
-    }
-    
-    Task task;
-    task.task_id = task_id;
-    task.start = static_cast<uint64_t>(task_id) * g_chunk_size + 2;
-    task.end = static_cast<uint64_t>(task_id + 1) * g_chunk_size;
-    
-    // 计算素数
-    std::vector<uint64_t> primes = computePrimesInRange(task.start, task.end);
-    size_t count = primes.size();
-    
-    // 更新统计
-    int completed = g_completed_tasks.fetch_add(1) + 1;
-    g_total_primes.fetch_add(static_cast<int>(count));
-    
-    // 打印进度
-    if (completed % 10 == 0 || completed == g_num_tasks) {
-        double progress = 100.0 * completed / g_num_tasks;
-        std::cout << "\r进度: " << std::fixed << std::setprecision(1) 
-                  << progress << "% (" << completed << "/" << g_num_tasks 
-                  << " 任务, 素数: " << g_total_primes.load() << ")" << std::flush;
-    }
-    
-    applog.debug("核心 {} 完成任务 {} [{}-{}], 找到 {} 个素数", 
-                 core_id, task.task_id, task.start, task.end, count);
-    
-    return seastar::make_ready_future<TaskResult>(
-        TaskResult{task.task_id, task.start, task.end, core_id, std::move(primes)}
-    );
-}
-
-// 收集任务结果 - 返回future以便链式调用
-seastar::future<> collectResult(TaskResult result) {
-    if (result.task_id >= 0) {  // 有效结果
-        std::lock_guard<std::mutex> lock(g_results_mutex);
-        g_results.push_back(std::move(result));
-    }
-    return seastar::make_ready_future<>();
-}
-
-// 工作核心函数：持续从队列获取任务直到队列为空
-// 使用.then()链递归实现
+// 工作核心函数：使用 seastar::repeat 循环处理任务
 seastar::future<> workerCoreLoop(int core_id) {
-    // 检查是否还有任务
-    if (g_next_task_id.load(std::memory_order_relaxed) >= g_total_tasks) {
-        return seastar::make_ready_future<>();
-    }
-    
-    // 处理任务 - 使用then链
-    return processTaskOnCore(core_id).then([core_id](TaskResult result) {
-        return collectResult(std::move(result));
-    }).then([core_id]() -> seastar::future<> {
-        // 继续处理
-        return workerCoreLoop(core_id);
+    return seastar::repeat([core_id] {
+        // 从全局队列获取下一个任务（工作窃取）
+        int task_id = g_next_task_id.fetch_add(1, std::memory_order_relaxed);
+        
+        if (task_id >= g_total_tasks) {
+            // 没有更多任务，停止循环
+            return seastar::make_ready_future<seastar::stop_iteration>(
+                seastar::stop_iteration::yes);
+        }
+        
+        Task task;
+        task.task_id = task_id;
+        task.start = static_cast<uint64_t>(task_id) * g_chunk_size + 2;
+        task.end = static_cast<uint64_t>(task_id + 1) * g_chunk_size;
+        
+        // 使用 seastar::async 在后台线程中计算素数，避免阻塞 reactor
+        return seastar::async([task, core_id] {
+            return computePrimesInRange(task.start, task.end);
+        }).then([task, core_id](std::vector<uint64_t> primes) -> seastar::future<seastar::stop_iteration> {
+            size_t count = primes.size();
+            
+            // 更新统计
+            int completed = g_completed_tasks.fetch_add(1) + 1;
+            g_total_primes.fetch_add(static_cast<int>(count));
+            
+            // 打印进度
+            if (completed % 10 == 0 || completed == g_num_tasks) {
+                double progress = 100.0 * completed / g_num_tasks;
+                std::cout << "\r进度: " << std::fixed << std::setprecision(1) 
+                          << progress << "% (" << completed << "/" << g_num_tasks 
+                          << " 任务, 素数: " << g_total_primes.load() << ")" << std::flush;
+            }
+            
+            applog.debug("核心 {} 完成任务 {} [{}-{}], 找到 {} 个素数", 
+                         core_id, task.task_id, task.start, task.end, count);
+            
+            // 收集结果
+            {
+                std::lock_guard<std::mutex> lock(g_results_mutex);
+                g_results.push_back(TaskResult{task.task_id, task.start, task.end, core_id, std::move(primes)});
+            }
+            
+            // 继续处理下一个任务
+            return seastar::make_ready_future<seastar::stop_iteration>(
+                seastar::stop_iteration::no);
+        });
     });
 }
 
@@ -168,37 +160,43 @@ void initTaskQueue(int num_tasks, int chunk_size, int num_cores) {
     std::cout << "========================================\n" << std::endl;
 }
 
-// 输出计算结果到CSV文件函数 - 消除重复代码
-void outputResults(const std::string& filename) {
-    std::ofstream file(filename);
-    if (!file.is_open()) {
-        applog.error("无法打开输出文件: {}", filename);
-        std::cerr << "错误: 无法打开输出文件 " << filename << std::endl;
-        return;
-    }
-    
+// 输出计算结果到CSV文件函数 - 使用Seastar异步I/O避免阻塞reactor
+seastar::future<> outputResults(const std::string& filename) {
     std::cout << "\n正在写入结果文件: " << filename << std::endl;
     
-    // 按任务ID排序输出
+    // 按任务ID排序（在主线程完成，但排序时间较短）
     std::sort(g_results.begin(), g_results.end(), 
               [](const TaskResult& a, const TaskResult& b) {
                   return a.task_id < b.task_id;
               });
     
+    // 构建输出内容（分批处理避免单次大内存分配）
+    std::string content;
+    content.reserve(g_results.size() * 100);  // 预分配空间
+    
     for (const auto& result : g_results) {
-        // 第一字段：任务范围
-        file << result.start << "-" << result.end;
-        // 第二字段：CPU核编号
-        file << "," << result.core_id;
-        // 后续字段：素数列表
+        content += std::to_string(result.start) + "-" + std::to_string(result.end);
+        content += "," + std::to_string(result.core_id);
         for (uint64_t prime : result.primes) {
-            file << "," << prime;
+            content += "," + std::to_string(prime);
         }
-        file << "\n";
+        content += "\n";
     }
     
-    file.close();
-    std::cout << "结果已写入: " << filename << std::endl;
+    // 使用Seastar异步文件I/O
+    return seastar::open_file_dma(filename, seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate).then(
+        [content = std::move(content), filename](seastar::file f) {
+            return seastar::do_with(std::move(f), std::move(content), [filename](seastar::file& f, const std::string& content) {
+                return f.dma_write(0, content.data(), content.size()).then(
+                    [&f, filename, size = content.size()](size_t written) {
+                        if (written != size) {
+                            applog.error("写入不完整: {} / {}", written, size);
+                        }
+                        std::cout << "结果已写入: " << filename << std::endl;
+                        return f.close();
+                    });
+            });
+        });
 }
 
 // 打印统计结果
@@ -220,44 +218,33 @@ void printStatistics(long duration_ms) {
 }
 
 // Seastar应用主函数
-seastar::future<> seastar_main() {
+seastar::future<> seastar_main(const po::variables_map& config) {
     // 设置日志级别 - 默认error
     applog.set_level(seastar::log_level::error);
     
-    // 检查环境变量
-    if (const char* env_tasks = std::getenv("NUM_TASKS")) {
-        g_num_tasks = std::atoi(env_tasks);
-    }
-    if (const char* env_chunk = std::getenv("CHUNK_SIZE")) {
-        g_chunk_size = std::atoi(env_chunk);
-    }
-    if (const char* env_cores = std::getenv("NUM_CORES")) {
-        g_num_cores = std::atoi(env_cores);
-    }
-    if (const char* env_log = std::getenv("LOG_LEVEL")) {
-        std::string level(env_log);
+    // 从命令行参数获取配置
+    g_num_tasks = config["tasks"].as<int>();
+    g_chunk_size = config["chunk"].as<int>();
+    // 使用 Seastar 框架的 -c/--smp 参数设置的核心数
+    g_num_cores = static_cast<int>(seastar::smp::count);
+    
+    if (config.count("log-level")) {
+        std::string level = config["log-level"].as<std::string>();
         if (level == "debug") applog.set_level(seastar::log_level::debug);
         else if (level == "info") applog.set_level(seastar::log_level::info);
         else if (level == "trace") applog.set_level(seastar::log_level::trace);
     }
     
-    // 调整参数
-    if (g_chunk_size > 100000) {
-        applog.error("区间大小超过10万，已调整为10万");
-        g_chunk_size = 100000;
-    }
-    
-    // 限制核心数
-    int max_cores = seastar::smp::count;
-    if (g_num_cores > max_cores) {
-        applog.error("请求的核心数 {} 超过系统可用 {}，已调整", g_num_cores, max_cores);
-        g_num_cores = max_cores;
-    }
     if (g_num_cores <= 0) g_num_cores = 1;
     
-    // 输出文件名
-    std::string output_file = "primes_" + std::to_string(g_num_tasks) + "_" + 
-                               std::to_string(g_chunk_size) + ".csv";
+    // 从命令行参数获取输出文件名
+    std::string output_file = "minimax_seastar_prime.csv";
+    if (config.count("output")) {
+        output_file = config["output"].as<std::string>();
+    }
+    
+    applog.info("启动配置: 任务数={}, 区间大小={}, 核心数={}, 输出文件={}", 
+                g_num_tasks, g_chunk_size, g_num_cores, output_file);
     
     // 调用函数初始化任务队列
     initTaskQueue(g_num_tasks, g_chunk_size, g_num_cores);
@@ -265,6 +252,7 @@ seastar::future<> seastar_main() {
     // 记录开始时间
     auto start_time = std::chrono::high_resolution_clock::now();
     
+    applog.info("开始并行计算...");
     std::cout << "开始并行计算...\n" << std::endl;
     std::cout << std::flush;
     
@@ -289,19 +277,28 @@ seastar::future<> seastar_main() {
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
             
-            // 调用函数输出结果到CSV文件
-            outputResults(output_file);
-            
-            // 打印统计结果
-            printStatistics(duration.count());
-            
-            return seastar::make_ready_future<>();
+            // 调用函数输出结果到CSV文件（异步I/O）
+            return outputResults(output_file).then([duration, start_time]() {
+                // 打印统计结果
+                printStatistics(duration.count());
+                applog.info("计算完成: 任务数={}, 素数总数={}, 耗时={}ms", 
+                            g_completed_tasks.load(), g_total_primes.load(), duration.count());
+                return seastar::make_ready_future<>();
+            });
         });
 }
 
 int main(int argc, char** argv) {
     seastar::app_template app;
-    return app.run(argc, argv, []() {
-        return seastar_main();
+    
+    // 添加命令行选项（核心数使用 Seastar 框架的 -c/--smp 参数）
+    app.add_options()
+        ("tasks,t", po::value<int>()->default_value(20), "任务总数")
+        ("chunk,n", po::value<int>()->default_value(100000), "每个任务的区间大小")
+        ("output,o", po::value<std::string>()->default_value("minimax_seastar_prime.csv"), "输出CSV文件路径")
+        ("log-level,l", po::value<std::string>(), "日志级别 (debug/info/error/trace)");
+    
+    return app.run(argc, argv, [&app] {
+        return seastar_main(app.configuration());
     });
 }

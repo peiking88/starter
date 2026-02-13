@@ -262,11 +262,6 @@ int main(int argc, char** argv) {
     if (chunk_size <= 0) chunk_size = 100000;
     if (num_threads <= 0) num_threads = 4;
     
-    if (chunk_size > 100000) {
-        std::cerr << "警告: 区间大小超过10万，已调整为10万" << std::endl;
-        chunk_size = 100000;
-    }
-    
     g_num_threads = num_threads;
     
     // 初始化任务队列

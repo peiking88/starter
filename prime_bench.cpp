@@ -232,58 +232,22 @@ int main(int argc, char** argv) {
     std::cout << "[3/5] 运行 glm5_libfork (libfork fork-join)..." << std::endl;
     results.push_back(runProgram("glm5_libfork_prime", args_str));
     
-    // 4. 运行 glm5_seastar 版本
-    std::cout << "[4/5] 运行 glm5_seastar (Seastar框架)..." << std::endl;
-    // Seastar 版本使用 -t 和 -n 参数，-c 是给 seastar 用的
-    // 添加 --logger-ostream-type none 关闭 Seastar 日志
-    std::ostringstream seastar_args;
-    seastar_args << "-t " << num_tasks << " -n " << chunk_size << " -c" << num_threads 
-                 << " --logger-ostream-type none";
-    results.push_back(runProgram("glm5_seastar_prime", seastar_args.str()));
-    
-    // 5. 运行 minimax_seastar 版本
+    // 4. 运行 minimax_seastar 版本
     std::cout << "[5/5] 运行 minimax_seastar (Seastar工作窃取)..." << std::endl;
-    // minimax_seastar_prime 使用环境变量，需要构建环境变量参数
+    // minimax_seastar_prime 使用框架的 -c 参数设置核心数
     std::ostringstream minimax_seastar_args;
-    minimax_seastar_args << "--logger-ostream-type none";
-    std::string minimax_seastar_env = "NUM_TASKS=" + std::to_string(num_tasks) + 
-                                       " CHUNK_SIZE=" + std::to_string(chunk_size) + 
-                                       " NUM_CORES=" + std::to_string(num_threads);
-    std::string minimax_seastar_cmd = minimax_seastar_env + " ./minimax_seastar_prime " + minimax_seastar_args.str();
+    minimax_seastar_args << "-t " << num_tasks << " -n " << chunk_size 
+                         << " -c" << num_threads << " --logger-ostream-type none";
+    results.push_back(runProgram("minimax_seastar_prime", minimax_seastar_args.str()));
     
-    BenchmarkResult minimax_seastar_result;
-    minimax_seastar_result.name = "minimax_seastar";
-    
-    auto start_time = std::chrono::high_resolution_clock::now();
-    FILE* pipe = popen(minimax_seastar_cmd.c_str(), "r");
-    if (pipe) {
-        char buffer[128];
-        std::string output;
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            output += buffer;
-        }
-        pclose(pipe);
+    // 5. 运行 glm5_seastar 版本
+    std::cout << "[4/5] 运行 glm5_seastar (Seastar框架)..." << std::endl;
+    // Seastar 使用框架的 -c 参数设置核心数
+    std::ostringstream seastar_args;
+    seastar_args << "-t " << num_tasks << " -n " << chunk_size 
+                 << " -c" << num_threads << " --logger-ostream-type none";
+    results.push_back(runProgram("glm5_seastar_prime", seastar_args.str()));
         
-        auto end_time = std::chrono::high_resolution_clock::now();
-        minimax_seastar_result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        
-        // 解析素数总数
-        std::istringstream iss(output);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (line.find("素数总数:") != std::string::npos) {
-                size_t pos = line.find(":");
-                if (pos != std::string::npos) {
-                    std::string num_str = line.substr(pos + 1);
-                    num_str.erase(std::remove_if(num_str.begin(), num_str.end(), ::isspace), num_str.end());
-                    minimax_seastar_result.primes = std::stoull(num_str);
-                    break;
-                }
-            }
-        }
-    }
-    results.push_back(minimax_seastar_result);
-    
     // 打印结果
     printResults(results);
     

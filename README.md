@@ -56,26 +56,63 @@ ninja -C build
 
 ## 程序使用
 
-### minimax_seastar_prime
+### Seastar 程序通用参数
 
-使用Seastar框架的素数计算器，采用工作窃取模式实现动态负载均衡。
+Seastar程序使用框架内置的命令行参数处理：
 
 ```bash
-# 基本运行（使用环境变量配置）
-NUM_TASKS=20 CHUNK_SIZE=100000 NUM_CORES=32 ./minimax_seastar_prime
-
-# 启用调试日志
-LOG_LEVEL=debug NUM_TASKS=10 CHUNK_SIZE=10000 NUM_CORES=4 ./minimax_seastar_prime
+./<program> -t <tasks> -n <chunk> -o <output> -l <log-level> -c <cores>
 ```
 
-**参数说明:**
-- `NUM_TASKS`: 任务总数 (默认: 20)
-- `CHUNK_SIZE`: 每个任务的区间大小，不超过10万 (默认: 100000)
-- `NUM_CORES`: CPU核心数 (默认: 4)
-- `LOG_LEVEL`: 日志级别 - error/info/debug/trace (默认: error)
+**通用参数说明:**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-t, --tasks` | 任务总数 | 20 |
+| `-n, --chunk` | 每个任务的区间大小 | 100000 |
+| `-o, --output` | 输出CSV文件路径 | `<program_name>.csv` |
+| `-l, --log-level` | 日志级别 (debug/info/error/trace) | error |
+| `-c, --smp` | CPU核心数 (Seastar框架参数) | 系统核心数 |
+
+### minimax_seastar_prime
+
+使用Seastar框架的素数计算器，采用**工作窃取模式**实现动态负载均衡。
+
+**特点:**
+- 无锁原子计数器实现任务分发
+- 异步 DMA I/O 文件写入，避免 reactor 阻塞
+- 各核心独立获取任务，无单点瓶颈
+
+```bash
+# 基本运行
+./minimax_seastar_prime -t 20 -n 100000 -c 4
+
+# 启用调试日志
+./minimax_seastar_prime -t 10 -n 10000 -l debug -c 4
+```
 
 **输出格式:**
-- CSV文件: `primes_<tasks>_<chunk>.csv`
+- CSV文件: `minimax_seastar_prime.csv` (或 `-o` 指定)
+- 每行格式: `<start>-<end>,<core_id>,<prime1>,<prime2>,...`
+
+### glm5_seastar_prime
+
+使用Seastar框架的素数计算器，采用**集中式队列 (fork-join模式)**。
+
+**特点:**
+- 集中式任务队列由 core 0 管理
+- 异步 DMA I/O 文件写入，避免 reactor 阻塞
+- 任务获取和结果收集通过 `submit_to(0)` 通信
+
+```bash
+# 基本运行
+./glm5_seastar_prime -t 20 -n 100000 -c 4
+
+# 指定输出文件
+./glm5_seastar_prime -t 20 -n 100000 -o result.csv -c 4
+```
+
+**输出格式:**
+- CSV文件: `glm5_seastar_prime.csv` (或 `-o` 指定)
 - 每行格式: `<start>-<end>,<core_id>,<prime1>,<prime2>,...`
 
 ### prime_bench
@@ -134,13 +171,23 @@ rm -f input.dat chunk.*
 
 ## 技术特性
 
-### minimax_seastar_prime 特性
+### Seastar 程序特性
 
-1. **.then()调用链**: 使用Seastar的future/promise模式，避免C++20协程
-2. **工作窃取**: 使用原子计数器实现动态任务分配
-3. **submit_to**: 使用`smp::submit_to()`将任务提交到指定CPU核心
-4. **Seastar日志**: 使用`seastar::logger`进行日志记录
-5. **CSV输出**: 格式化的结果输出
+1. **异步编程模式**: 使用 Seastar 的 `future<>`/`.then()` 调用链
+2. **异步 DMA I/O**: 使用 `open_file_dma()` + `dma_write()` 避免阻塞 reactor
+3. **seastar::async**: 将 CPU 密集计算放入后台线程
+4. **seastar::repeat**: 高效的任务循环处理
+5. **命令行参数**: 使用 `app_template::add_options()` 框架处理
+
+### 两种 Seastar 实现对比
+
+| 特性 | minimax_seastar | glm5_seastar |
+|------|-----------------|--------------|
+| **任务调度** | 无锁原子计数器 (工作窃取) | 集中式队列 (core 0) |
+| **核心通信** | 最小化 | 频繁 `submit_to(0)` |
+| **文件I/O** | 异步 DMA | 异步 DMA |
+| **扩展性** | 线性好 | core 0 可能成为瓶颈 |
+| **适用场景** | 高并发、多核 | 小规模、调试方便 |
 
 ### 代码结构
 
