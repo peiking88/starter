@@ -37,3 +37,6 @@ target_link_libraries(prime_bench Seastar::seastar libfork::libfork)
 
 add_executable(pony_alpha pony_alpha.cpp)
 target_link_libraries(pony_alpha Seastar::seastar)
+
+add_executable(minimax_prime minimax_prime.cpp)
+target_link_libraries(minimax_prime libfork::libfork)
