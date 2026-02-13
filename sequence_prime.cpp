@@ -89,7 +89,7 @@ void initTaskQueue(int num_tasks, int chunk_size, int num_threads) {
     
     // 打印初始化信息
     std::cout << "\n========================================" << std::endl;
-    std::cout << "       任务队列初始化完成" << std::endl;
+    std::cout << "任务队列初始化完成" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "计算范围: 2 - " << static_cast<uint64_t>(num_tasks) * chunk_size << std::endl;
     std::cout << "区间大小: " << chunk_size << std::endl;
@@ -138,7 +138,7 @@ void outputResults(const std::string& filename) {
 // ============================================================================
 void printStatistics(long duration_ms) {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "         计算结果统计" << std::endl;
+    std::cout << "计算结果统计" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "已完成任务: " << g_completed_tasks.load() << "/" << g_config.num_tasks << std::endl;
     std::cout << "素数总数:   " << g_total_primes.load() << std::endl;
@@ -253,8 +253,7 @@ int main(int argc, char** argv) {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     
     // 5. 输出结果到CSV文件
-    std::string output_file = "primes_" + std::to_string(num_tasks) + "_" + 
-                               std::to_string(chunk_size) + ".csv";
+    std::string output_file = "sequence_prime.csv";
     outputResults(output_file);
     
     // 6. 打印统计结果
