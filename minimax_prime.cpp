@@ -15,6 +15,7 @@
 #include <string>
 #include <optional>
 #include <iomanip>
+#include <getopt.h>
 
 // 全局配置
 int g_num_tasks = 20;           // 任务总数
@@ -219,27 +220,43 @@ void outputResults(const std::string& filename) {
 
 int main(int argc, char** argv) {
     // 解析命令行参数
-    if (argc < 4) {
-        std::cout << "minimax_prime - 并行素数计算程序 (使用 libfork 框架)" << std::endl;
-        std::cout << "\n用法: " << argv[0] << " <任务数> <区间大小> <线程数>" << std::endl;
-        std::cout << "\n参数说明:" << std::endl;
-        std::cout << "  任务数    - 总任务数 (例如: 100)" << std::endl;
-        std::cout << "  区间大小  - 每个任务计算的数字范围，不超过10万 (例如: 100000)" << std::endl;
-        std::cout << "  线程数    - 使用的工作线程数 (例如: 8, 16, 32)" << std::endl;
-        std::cout << "\n示例:" << std::endl;
-        std::cout << "  " << argv[0] << " 100 100000 8    # 100任务, 每任务10万, 8线程" << std::endl;
-        std::cout << "  " << argv[0] << " 200 50000 16    # 200任务, 每任务5万, 16线程" << std::endl;
-        std::cout << "  " << argv[0] << " 320 10000 32    # 320任务, 每任务1万, 32线程 (32核)" << std::endl;
-        return 1;
+    int num_tasks = 20;
+    int chunk_size = 100000;
+    int num_threads = 4;
+    
+    int opt;
+    while ((opt = getopt(argc, argv, "t:n:c:")) != -1) {
+        switch (opt) {
+            case 't':
+                num_tasks = std::atoi(optarg);
+                break;
+            case 'n':
+                chunk_size = std::atoi(optarg);
+                break;
+            case 'c':
+                num_threads = std::atoi(optarg);
+                break;
+            default:
+                std::cerr << "用法: " << argv[0] << " [-t 任务数] [-n 区间大小] [-c 线程数]" << std::endl;
+                std::cout << "\n参数说明:" << std::endl;
+                std::cout << "  -t <N>   任务数 (默认: 20)" << std::endl;
+                std::cout << "  -n <N>   区间大小，每任务计算的数字范围，不超过10万 (默认: 100000)" << std::endl;
+                std::cout << "  -c <N>   CPU核数/线程数 (默认: 4)" << std::endl;
+                std::cout << "\n示例:" << std::endl;
+                std::cout << "  " << argv[0] << " -t 100 -n 100000 -c 8   # 100任务, 每任务10万, 8核" << std::endl;
+                std::cout << "  " << argv[0] << " -t 200 -n 50000 -c 16  # 200任务, 每任务5万, 16核" << std::endl;
+                std::cout << "  " << argv[0] << " -t 320 -n 10000 -c 32  # 320任务, 每任务1万, 32核" << std::endl;
+                return 1;
+        }
     }
     
-    int num_tasks = std::atoi(argv[1]);
-    int chunk_size = std::atoi(argv[2]);
-    int num_threads = std::atoi(argv[3]);
+    if (num_tasks <= 0) num_tasks = 20;
+    if (chunk_size <= 0) chunk_size = 100000;
+    if (num_threads <= 0) num_threads = 4;
     
-    if (num_tasks <= 0 || chunk_size <= 0 || num_threads <= 0) {
-        std::cerr << "错误: 所有参数必须为正整数" << std::endl;
-        return 1;
+    if (chunk_size > 100000) {
+        std::cerr << "警告: 区间大小超过10万，已调整为10万" << std::endl;
+        chunk_size = 100000;
     }
     
     g_num_threads = num_threads;
