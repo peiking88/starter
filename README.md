@@ -9,10 +9,10 @@
 | 程序 | 框架 | 描述 |
 |------|------|------|
 | `big_file_splitter` | Seastar | 大文件并行分割器 |
-| `glm5_seastar_prime` | Seastar | 素数并行计算器 (fork-join模式) |
-| `minimax_seastar_prime` | Seastar | 素数并行计算器 (工作窃取模式) |
-| `glm5_libfork_prime` | libfork | 素数并行计算器 (fork-join模式) |
-| `minimax_libfork_prime` | libfork | 素数并行计算器 (工作窃取模式) |
+| `glm5_seastar_prime` | Seastar | 素数并行计算器 (集中队列模式) |
+| `minimax_seastar_prime` | Seastar | 素数并行计算器 (无锁原子模式) |
+| `glm5_libfork_prime` | libfork | 素数并行计算器 (框架fork-join模式) |
+| `minimax_libfork_prime` | libfork | 素数并行计算器 (线程+协程模式) |
 | `sequence_prime` | 标准库 | 顺序素数计算器 |
 | `prime_bench` | 标准库 | 多框架性能基准测试 |
 
