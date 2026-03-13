@@ -37,6 +37,12 @@ target_link_libraries(glm5_seastar_prime Seastar::seastar)
 add_executable(minimax_seastar_prime minimax_seastar_prime.cpp)
 target_link_libraries(minimax_seastar_prime Seastar::seastar)
 
+add_executable(dpsk4_seastar_prime dpsk4_seastar_prime.cpp)
+target_link_libraries(dpsk4_seastar_prime Seastar::seastar)
+
+add_executable(healer_seastar_prime healer_seastar_prime.cpp)
+target_link_libraries(healer_seastar_prime Seastar::seastar)
+
 # libfork程序
 add_executable(glm5_libfork_prime glm5_libfork_prime.cpp)
 target_link_libraries(glm5_libfork_prime libfork::libfork)

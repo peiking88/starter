@@ -1,5 +1,5 @@
 // prime_bench: 素数计算性能基准测试
-// 依次调用外部程序：sequence、minimax_libfork、glm5_libfork、glm5_seastar、minimax_seastar
+// 依次调用外部程序：sequence、minimax_libfork、glm5_libfork、glm5_seastar、minimax_seastar、dpsk4_seastar、healer_seastar
 
 #include <iostream>
 #include <fstream>
@@ -221,32 +221,37 @@ int main(int argc, char** argv) {
     std::vector<BenchmarkResult> results;
     
     // 1. 运行 sequence 版本
-    std::cout << "\n[1/5] 运行 sequence (顺序计算)..." << std::endl;
+    std::cout << "\n[1/7] 运行 sequence (顺序计算)..." << std::endl;
     results.push_back(runProgram("sequence_prime", args_str));
     
     // 2. 运行 minimax_libfork 版本
-    std::cout << "[2/5] 运行 minimax_libfork (libfork工作窃取)..." << std::endl;
+    std::cout << "[2/7] 运行 minimax_libfork (libfork工作窃取)..." << std::endl;
     results.push_back(runProgram("minimax_libfork_prime", args_str));
     
     // 3. 运行 glm5_libfork 版本
-    std::cout << "[3/5] 运行 glm5_libfork (libfork fork-join)..." << std::endl;
+    std::cout << "[3/7] 运行 glm5_libfork (libfork fork-join)..." << std::endl;
     results.push_back(runProgram("glm5_libfork_prime", args_str));
     
     // 4. 运行 minimax_seastar 版本
-    std::cout << "[5/5] 运行 minimax_seastar (Seastar工作窃取)..." << std::endl;
-    // minimax_seastar_prime 使用框架的 -c 参数设置核心数
-    std::ostringstream minimax_seastar_args;
-    minimax_seastar_args << "-t " << num_tasks << " -n " << chunk_size 
-                         << " -c" << num_threads << " --logger-ostream-type none";
-    results.push_back(runProgram("minimax_seastar_prime", minimax_seastar_args.str()));
-    
-    // 5. 运行 glm5_seastar 版本
-    std::cout << "[4/5] 运行 glm5_seastar (Seastar框架)..." << std::endl;
-    // Seastar 使用框架的 -c 参数设置核心数
+    std::cout << "[4/7] 运行 minimax_seastar (Seastar工作窃取)..." << std::endl;
     std::ostringstream seastar_args;
     seastar_args << "-t " << num_tasks << " -n " << chunk_size 
                  << " -c" << num_threads << " --logger-ostream-type none";
+    results.push_back(runProgram("minimax_seastar_prime", seastar_args.str()));
+    
+    // 5. 运行 glm5_seastar 版本
+    std::cout << "[5/7] 运行 glm5_seastar (Seastar框架)..." << std::endl;
     results.push_back(runProgram("glm5_seastar_prime", seastar_args.str()));
+    
+    // 6. 运行 dpsk4_seastar 版本
+    std::cout << "[6/7] 运行 dpsk4_seastar (Seastar静态分配)..." << std::endl;
+    results.push_back(runProgram("dpsk4_seastar_prime", seastar_args.str()));
+    
+    // 7. 运行 healer_seastar 版本（不使用 -c 参数）
+    std::cout << "[7/7] 运行 healer_seastar (Seastar静态分配)..." << std::endl;
+    std::ostringstream healer_args;
+    healer_args << "-t " << num_tasks << " -n " << chunk_size << " --logger-ostream-type none";
+    results.push_back(runProgram("healer_seastar_prime", healer_args.str()));
         
     // 打印结果
     printResults(results);
