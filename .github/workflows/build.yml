@@ -1,0 +1,28 @@
+name: Build and test
+on: [pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        submodules: recursive
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo seastar/install-dependencies.sh
+        sudo apt-get install -qq ninja-build clang
+    - name: Configure
+      run: cmake -Bbuild -S. -GNinja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+    - name: Build
+      run: ninja -C build
+    - name: Test
+      run: |
+        dd if=/dev/zero of=input.dat bs=4096 count=10000
+        build/big_file_splitter --input input.dat -c2
+        ls -l

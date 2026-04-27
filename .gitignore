@@ -1,0 +1,31 @@
+# Build
+build/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# Output
+output/
+*.so
+*.csv
+*.o
+*.a
+
+# Runtime
+input.dat
+chunk.*
+
+# Editor / OS
+.*.swp
+.cache/
+.vscode/
+.idea/
+*.dSYM/
+
+# Claude
+.claude/
+
+# Dependencies (managed as submodules)
+external/
