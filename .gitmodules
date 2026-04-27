@@ -5,7 +5,3 @@
 [submodule "external/libfork"]
 	path = external/libfork
 	url = https://bgithub.xyz/ConorWilliams/libfork.git
-
-[submodule "external/taskflow"]
-	path = external/taskflow
-	url = https://bgithub.xyz/taskflow/taskflow.git

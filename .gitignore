@@ -27,5 +27,5 @@ chunk.*
 # Claude
 .claude/
 
-# Dependencies (managed as submodules)
+# Dependencies (clone manually or via submodules)
 external/
