@@ -10,7 +10,7 @@ provider: trae
 
 ## 核心规则
 
-1. **GitHub 访问**: 使用 `bgithub.xyz` 域名
+1. **GitHub 访问**: 使用 `github.com` 域名
 2. **Git 配置**: 用户名 `peiking88`，凭据使用环境变量或 git credential store
 3. **语言规范**: 工作中文输出，提交/README 用英文
 4. **编译参数**: `-j$(nproc)` 并行编译
